@@ -1,0 +1,111 @@
+import { DefectType, GlobalClass, LineType, Sample, SampleStatus } from './types';
+
+export const GLOBAL_CLASSES: GlobalClass[] = [
+  { id: 101, name: '划痕 (Scratch)', code: DefectType.SCRATCH, color: 'bg-red-500' },
+  { id: 102, name: '开焊 (Soldering)', code: DefectType.SOLDERING, color: 'bg-yellow-500' },
+  { id: 103, name: '异物 (Debris)', code: DefectType.DEBRIS, color: 'bg-orange-500' },
+];
+
+export const MOCK_SAMPLES: Sample[] = [
+  {
+    id: 'PCB-001',
+    filename: 'PCB_Layer1_001.jpg',
+    thumbnailUrl: 'https://picsum.photos/id/20/100/100',
+    line: LineType.WIRELESS,
+    defects: [DefectType.SCRATCH],
+    status: SampleStatus.LABELED,
+    uploadDate: '2023-10-26',
+  },
+  {
+    id: 'PCB-002',
+    filename: 'PCB_Layer1_002.jpg',
+    thumbnailUrl: 'https://picsum.photos/id/11/100/100',
+    line: LineType.OPTICAL,
+    defects: [],
+    status: SampleStatus.UNLABELED,
+    uploadDate: '2023-10-26',
+  },
+  {
+    id: 'PCB-003',
+    filename: 'PCB_Layer2_015.jpg',
+    thumbnailUrl: 'https://picsum.photos/id/12/100/100',
+    line: LineType.WIRELESS,
+    defects: [DefectType.SOLDERING, DefectType.DEBRIS],
+    status: SampleStatus.LABELED,
+    uploadDate: '2023-10-25',
+  },
+  {
+    id: 'PCB-004',
+    filename: 'PCB_Layer1_018.jpg',
+    thumbnailUrl: 'https://picsum.photos/id/13/100/100',
+    line: LineType.OPTICAL,
+    defects: [DefectType.SCRATCH],
+    status: SampleStatus.UNLABELED,
+    uploadDate: '2023-10-25',
+  },
+  {
+    id: 'PCB-005',
+    filename: 'PCB_Final_099.jpg',
+    thumbnailUrl: 'https://picsum.photos/id/14/100/100',
+    line: LineType.WIRELESS,
+    defects: [],
+    status: SampleStatus.UNLABELED,
+    uploadDate: '2023-10-24',
+  },
+  {
+    id: 'PCB-006',
+    filename: 'PCB_Raw_102.jpg',
+    thumbnailUrl: 'https://picsum.photos/id/15/100/100',
+    line: LineType.OPTICAL,
+    defects: [DefectType.DEBRIS],
+    status: SampleStatus.LABELED,
+    uploadDate: '2023-10-24',
+  },
+  {
+    id: 'PCB-007',
+    filename: 'PCB_Check_001.jpg',
+    thumbnailUrl: 'https://picsum.photos/id/16/100/100',
+    line: LineType.WIRELESS,
+    defects: [DefectType.SOLDERING],
+    status: SampleStatus.LABELED,
+    uploadDate: '2023-10-23',
+  },
+  {
+    id: 'PCB-008',
+    filename: 'PCB_Check_002.jpg',
+    thumbnailUrl: 'https://picsum.photos/id/17/100/100',
+    line: LineType.OPTICAL,
+    defects: [],
+    status: SampleStatus.UNLABELED,
+    uploadDate: '2023-10-23',
+  },
+  {
+    id: 'PCB-009',
+    filename: 'PCB_Check_003.jpg',
+    thumbnailUrl: 'https://picsum.photos/id/18/100/100',
+    line: LineType.WIRELESS,
+    defects: [DefectType.SCRATCH, DefectType.DEBRIS],
+    status: SampleStatus.LABELED,
+    uploadDate: '2023-10-22',
+  },
+  {
+    id: 'PCB-010',
+    filename: 'PCB_Check_004.jpg',
+    thumbnailUrl: 'https://picsum.photos/id/19/100/100',
+    line: LineType.OPTICAL,
+    defects: [],
+    status: SampleStatus.UNLABELED,
+    uploadDate: '2023-10-22',
+  },
+];
+
+export const TERMINAL_LOGS = [
+  '> 正在加载数据集快照 [无线产线-划痕专项]...',
+  '> 验证数据完整性... Hash校验通过 (MD5: 8d7a...)',
+  '> 将数据库坐标转换为 YOLO 物理格式 (.txt)...',
+  '> 检测到目标硬件: CPU, 生成 requirements.txt (torch-cpu)...',
+  '> 正在渲染 train.py 训练脚本...',
+  '> 优化器配置: AdamW (lr=0.001)',
+  '> 打包资源文件... 压缩比 34%',
+  '> 构建完成 (Training_Package.zip).'
+];

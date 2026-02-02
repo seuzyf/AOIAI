@@ -1,0 +1,5 @@
+{
+  "name": "Industrial AI Offline Trainer",
+  "description": "A high-fidelity industrial AI training system for PCB defect detection, featuring sample management and model training configuration.",
+  "requestFramePermissions": []
+}
