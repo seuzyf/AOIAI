@@ -10,7 +10,7 @@ export const MOCK_SAMPLES: Sample[] = [
   {
     id: 'PCB-001',
     filename: 'PCB_Layer1_001.jpg',
-    thumbnailUrl: 'https://picsum.photos/id/20/100/100',
+    thumbnailUrl: '/images/1 (1).jpg',
     line: LineType.WIRELESS,
     defects: [DefectType.SCRATCH],
     status: SampleStatus.LABELED,
@@ -19,7 +19,7 @@ export const MOCK_SAMPLES: Sample[] = [
   {
     id: 'PCB-002',
     filename: 'PCB_Layer1_002.jpg',
-    thumbnailUrl: 'https://picsum.photos/id/11/100/100',
+    thumbnailUrl: '/images/1 (2).jpg',
     line: LineType.OPTICAL,
     defects: [],
     status: SampleStatus.UNLABELED,
@@ -28,7 +28,7 @@ export const MOCK_SAMPLES: Sample[] = [
   {
     id: 'PCB-003',
     filename: 'PCB_Layer2_015.jpg',
-    thumbnailUrl: 'https://picsum.photos/id/12/100/100',
+    thumbnailUrl: '/images/1 (3).jpg',
     line: LineType.WIRELESS,
     defects: [DefectType.SOLDERING, DefectType.DEBRIS],
     status: SampleStatus.LABELED,
@@ -37,7 +37,7 @@ export const MOCK_SAMPLES: Sample[] = [
   {
     id: 'PCB-004',
     filename: 'PCB_Layer1_018.jpg',
-    thumbnailUrl: 'https://picsum.photos/id/13/100/100',
+    thumbnailUrl: '/images/1 (4).jpg',
     line: LineType.OPTICAL,
     defects: [DefectType.SCRATCH],
     status: SampleStatus.UNLABELED,
@@ -46,7 +46,7 @@ export const MOCK_SAMPLES: Sample[] = [
   {
     id: 'PCB-005',
     filename: 'PCB_Final_099.jpg',
-    thumbnailUrl: 'https://picsum.photos/id/14/100/100',
+    thumbnailUrl: '/images/1 (5).jpg',
     line: LineType.WIRELESS,
     defects: [],
     status: SampleStatus.UNLABELED,
@@ -55,7 +55,7 @@ export const MOCK_SAMPLES: Sample[] = [
   {
     id: 'PCB-006',
     filename: 'PCB_Raw_102.jpg',
-    thumbnailUrl: 'https://picsum.photos/id/15/100/100',
+    thumbnailUrl: '/images/1 (6).jpg',
     line: LineType.OPTICAL,
     defects: [DefectType.DEBRIS],
     status: SampleStatus.LABELED,
@@ -64,7 +64,7 @@ export const MOCK_SAMPLES: Sample[] = [
   {
     id: 'PCB-007',
     filename: 'PCB_Check_001.jpg',
-    thumbnailUrl: 'https://picsum.photos/id/16/100/100',
+    thumbnailUrl: '/images/1 (7).jpg',
     line: LineType.WIRELESS,
     defects: [DefectType.SOLDERING],
     status: SampleStatus.LABELED,
@@ -73,7 +73,7 @@ export const MOCK_SAMPLES: Sample[] = [
   {
     id: 'PCB-008',
     filename: 'PCB_Check_002.jpg',
-    thumbnailUrl: 'https://picsum.photos/id/17/100/100',
+    thumbnailUrl: '/images/1 (8).jpg',
     line: LineType.OPTICAL,
     defects: [],
     status: SampleStatus.UNLABELED,
@@ -82,7 +82,7 @@ export const MOCK_SAMPLES: Sample[] = [
   {
     id: 'PCB-009',
     filename: 'PCB_Check_003.jpg',
-    thumbnailUrl: 'https://picsum.photos/id/18/100/100',
+    thumbnailUrl: '/images/1 (9).jpg',
     line: LineType.WIRELESS,
     defects: [DefectType.SCRATCH, DefectType.DEBRIS],
     status: SampleStatus.LABELED,
@@ -91,7 +91,7 @@ export const MOCK_SAMPLES: Sample[] = [
   {
     id: 'PCB-010',
     filename: 'PCB_Check_004.jpg',
-    thumbnailUrl: 'https://picsum.photos/id/19/100/100',
+    thumbnailUrl: '/images/1 (10).jpg',
     line: LineType.OPTICAL,
     defects: [],
     status: SampleStatus.UNLABELED,

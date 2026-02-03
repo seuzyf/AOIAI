@@ -113,8 +113,8 @@ export const SampleHub: React.FC = () => {
               onChange={(e) => setFilterLine(e.target.value)}
             >
               <option value="all">全产线</option>
-              <option value={LineType.WIRELESS}>无线产线</option>
-              <option value={LineType.OPTICAL}>光电产线</option>
+              <option value={LineType.WIRELESS}>无线</option>
+              <option value={LineType.OPTICAL}>光</option>
             </select>
             <div className="h-4 w-[1px] bg-slate-300 mx-1"></div>
             <span className="text-xs text-slate-500">共 {filteredSamples.length} 条数据</span>
@@ -156,7 +156,7 @@ export const SampleHub: React.FC = () => {
                     <span className={`inline-flex items-center px-2 py-1 rounded text-xs font-medium ${
                       sample.line === LineType.WIRELESS ? 'bg-blue-50 text-blue-700' : 'bg-purple-50 text-purple-700'
                     }`}>
-                      {sample.line === LineType.WIRELESS ? '无线产线' : '光电产线'}
+                      {sample.line === LineType.WIRELESS ? '无线' : '光'}
                     </span>
                   </td>
                   <td className="px-6 py-3">
@@ -210,8 +210,8 @@ export const SampleHub: React.FC = () => {
               <div>
                 <label className="text-sm font-medium text-slate-700 block mb-2">选择数据来源</label>
                 <div className="flex flex-wrap gap-2">
-                  <span className="px-3 py-1 bg-indigo-100 text-indigo-700 text-sm rounded border border-indigo-200 cursor-pointer">无线产线 (Selected)</span>
-                  <span className="px-3 py-1 bg-white text-slate-600 text-sm rounded border border-slate-200 cursor-pointer hover:bg-slate-50">光电产线</span>
+                  <span className="px-3 py-1 bg-indigo-100 text-indigo-700 text-sm rounded border border-indigo-200 cursor-pointer">无线 (Selected)</span>
+                  <span className="px-3 py-1 bg-white text-slate-600 text-sm rounded border border-slate-200 cursor-pointer hover:bg-slate-50">光</span>
                 </div>
               </div>
 
@@ -282,12 +282,14 @@ const AnnotationEditor: React.FC<AnnotationEditorProps> = ({ sample, onBack }) =
       {/* Center Canvas */}
       <div className="flex-1 bg-slate-900/95 relative overflow-hidden flex items-center justify-center p-8">
         <div className="relative shadow-2xl">
-          <img 
-            src={`https://picsum.photos/id/${parseInt(sample.id.split('-')[1]) + 10}/800/600`} 
-            alt="Worktable" 
-            className="max-w-full max-h-full block select-none"
-            style={{ width: '800px', height: '600px' }}
-          />
+        <img 
+          // 直接使用 sample 数据中的路径（即我们在 constants.ts 里配置的本地路径）
+          src={sample.thumbnailUrl} 
+          alt={sample.filename}
+          className="max-w-full max-h-full block select-none"
+          // 建议去掉强制的 width/height，让图片自适应，或者根据您图片的实际比例调整
+          // style={{ width: '800px', height: '600px' }} 
+        />
           
           {/* Mock Box 1 */}
           <div className="absolute border-2 border-red-500 bg-red-500/20" style={{ left: '30%', top: '25%', width: '15%', height: '10%' }}>

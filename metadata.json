@@ -1,5 +1,4 @@
 {
-  "name": "Industrial AI Offline Trainer",
-  "description": "A high-fidelity industrial AI training system for PCB defect detection, featuring sample management and model training configuration.",
-  "requestFramePermissions": []
+  "name": "Huawei Inspection AI Trainer",
+  "description": "专用于华为检测设备的 AI 模型训练与管理系统..."
 }

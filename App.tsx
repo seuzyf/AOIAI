@@ -4,6 +4,7 @@ import {
   Database, 
   Settings, 
   UserCircle2, 
+  ScanEye,
   Menu,
   ChevronRight
 } from 'lucide-react';
@@ -15,14 +16,14 @@ function App() {
   const [activeTab, setActiveTab] = useState<AppTab>('training');
 
   const menuItems = [
-    { id: 'training', label: '模型训练场', icon: BrainCircuit },
+    { id: 'training', label: '模型选型库', icon: ScanEye },
     { id: 'samples', label: '样本资源库', icon: Database },
     { id: 'settings', label: '系统设置', icon: Settings },
   ];
 
   const getBreadcrumb = () => {
     switch (activeTab) {
-      case 'training': return '模型训练场';
+      case 'training': return '模型选型库';
       case 'samples': return '样本资源库';
       case 'settings': return '系统设置';
       default: return '首页';
@@ -34,10 +35,10 @@ function App() {
       {/* Sidebar */}
       <aside className="w-64 bg-slate-900 text-slate-300 flex flex-col shadow-xl z-20">
         <div className="h-16 flex items-center px-6 border-b border-slate-800">
-          <div className="w-8 h-8 bg-indigo-600 rounded-lg flex items-center justify-center mr-3 shadow-lg shadow-indigo-900/50">
+          <div className="w-8 h-8 bg-red-700 rounded-lg flex items-center justify-center mr-3 shadow-lg shadow-indigo-900/50">
             <BrainCircuit className="text-white w-5 h-5" />
           </div>
-          <span className="text-white font-bold text-lg tracking-tight">AI Forge</span>
+          <span className="text-white font-bold text-lg tracking-tight">华为AI检测训练平台</span>
         </div>
 
         <nav className="flex-1 py-6 px-3 space-y-1">
@@ -47,7 +48,7 @@ function App() {
               onClick={() => setActiveTab(item.id as AppTab)}
               className={`w-full flex items-center px-3 py-3 rounded-lg transition-all duration-200 group ${
                 activeTab === item.id 
-                  ? 'bg-indigo-600 text-white shadow-md' 
+                  ? 'bg-red-700 text-white shadow-md' 
                   : 'hover:bg-slate-800 hover:text-white'
               }`}
             >
@@ -80,8 +81,8 @@ function App() {
             <div className="flex items-center gap-3 bg-slate-50 px-3 py-1.5 rounded-full border border-slate-200">
               <UserCircle2 className="w-8 h-8 text-slate-400" />
               <div className="flex flex-col">
-                <span className="text-xs font-bold text-slate-700">产线管理员: 张工</span>
-                <span className="text-[10px] text-slate-400">ID: OP-2024-88</span>
+                <span className="text-xs font-bold text-slate-700">AOI工程师: 周</span>
+                <span className="text-[10px] text-slate-400">ID: 00588771</span>
               </div>
             </div>
           </div>

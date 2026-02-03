@@ -73,8 +73,8 @@ export const TrainingForge: React.FC<TrainingForgeProps> = ({ onNavigateToSample
             <h2 className="text-xl font-semibold text-slate-800">选择应用场景</h2>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
               {[
-                { id: 'detection', name: '缺陷定位 (Detection)', desc: '识别缺陷位置与类别 (YOLOv8)', icon: Target },
-                { id: 'classification', name: '良品判定 (Classification)', desc: '整图二分类判定 (ResNet)', icon: Check },
+                { id: 'detection', name: '缺陷定位 (Detection)', desc: '识别缺陷位置与类别 (YOLO)', icon: Target },
+                { id: 'classification', name: '良品判定 (Classification)', desc: '整图二分类判定 (VGG)', icon: Check },
                 { id: 'segmentation', name: '图像分割 (Segmentation)', desc: '像素级精细分割 (UNet)', icon: Layers },
               ].map((item) => (
                 <div 
@@ -99,7 +99,7 @@ export const TrainingForge: React.FC<TrainingForgeProps> = ({ onNavigateToSample
             {scenario === 'detection' && (
               <div className="p-4 bg-blue-50 text-blue-800 text-sm rounded-lg border border-blue-100 flex items-center">
                 <BrainCircuit className="w-4 h-4 mr-2" />
-                系统已自动锁定基座模型: <span className="font-bold ml-1">YOLOv8-Industrial-S</span>
+                系统已自动锁定基座模型: <span className="font-bold ml-1">YOLO-Industrial-S</span>
               </div>
             )}
           </div>
