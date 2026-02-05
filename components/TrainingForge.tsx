@@ -152,8 +152,8 @@ export const TrainingForge: React.FC<TrainingForgeProps> = ({ onNavigateToSample
                 <label className="block text-sm font-medium text-slate-700 mb-2">选择数据集快照</label>
                 <div className="flex gap-3">
                   <select className="flex-1 border border-slate-300 rounded-lg px-4 py-2.5 focus:ring-2 focus:ring-indigo-500 outline-none text-slate-700 bg-white">
-                    <option>2024-无线产线-划痕专项 (500张)</option>
-                    <option>2024-全量测试集 (1200张) - Verified</option>
+                    <option>2026-无线产线-划痕专项 (500张)</option>
+                    <option>2026-全量测试集 (1200张) - Verified</option>
                   </select>
                   <button 
                     onClick={onNavigateToSampleHub}
