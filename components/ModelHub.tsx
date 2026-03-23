@@ -113,7 +113,7 @@ const UploadModal = ({ onClose, onRefresh }: { onClose: () => void, onRefresh: (
   return (
     <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
       <div className="bg-white rounded-xl shadow-xl w-full max-w-md p-6">
-        <h3 className="text-lg font-bold text-slate-900 mb-4">上传模型至 D 盘</h3>
+        <h3 className="text-lg font-bold text-slate-900 mb-4">上传模型</h3>
         <form onSubmit={handleSubmit} className="space-y-4">
           <div><label className="block text-sm font-medium mb-1">模型名称</label><input required className="w-full border rounded-lg px-3 py-2 text-sm" value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} /></div>
           <div><label className="block text-sm font-medium mb-1">检测目标</label><input required className="w-full border rounded-lg px-3 py-2 text-sm" value={formData.target} onChange={e => setFormData({...formData, target: e.target.value})} /></div>

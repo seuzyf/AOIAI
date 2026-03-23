@@ -1,162 +1,364 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Upload, FileUp, Search, Database, Loader2, Save, Trash2, Tag, ArrowLeft } from 'lucide-react';
-import { GLOBAL_CLASSES } from '../constants';
-import { Sample, Annotation, DefectType } from '../types';
+import { Upload, FileUp, Search, Database, Loader2, Save, Trash2, Tag, ArrowLeft, Plus, Filter, CheckSquare, Square, FolderArchive, Image as ImageIcon } from 'lucide-react';
+import { Sample, Annotation, GlobalClass } from '../types';
+import { DEVICE_BRANDS, PROCESS_TYPES, LINE_TYPES } from '../constants';
 import { api } from '../api';
 
 export const SampleHub: React.FC = () => {
   const [samples, setSamples] = useState<Sample[]>([]);
+  const [classes, setClasses] = useState<GlobalClass[]>([]);
   const [viewMode, setViewMode] = useState<'list' | 'editor'>('list');
   const [selectedSample, setSelectedSample] = useState<Sample | null>(null);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   
-  const [isUploading, setIsUploading] = useState(false);
-  const fileInputRef = useRef<HTMLInputElement>(null);
-
   const [searchTerm, setSearchTerm] = useState('');
+  const [showFilters, setShowFilters] = useState(false);
+  const [filters, setFilters] = useState({ lines: [] as string[], processes: [] as string[], devices: [] as string[], defects: [] as string[] });
 
-  useEffect(() => { loadData(); }, []);
+  const [uploadMode, setUploadMode] = useState<'none'|'batch'|'zip'>('none');
+  const [datasetModalOpen, setDatasetModalOpen] = useState(false);
 
-  const loadData = async () => {
-    try {
-      const data = await api.getSamples();
-      setSamples(data);
-    } catch (e) { console.error("API error, make sure backend is running on 3001"); }
+  useEffect(() => { loadData(); loadClasses(); }, []);
+
+  const loadData = async () => { try { setSamples(await api.getSamples()); } catch (e) { console.error(e); } };
+  const loadClasses = async () => { try { setClasses(await api.getClasses()); } catch (e) { console.error(e); } };
+
+  const handleAddClass = async () => {
+    const name = prompt('请输入新缺陷类型名称 (如: 极性错误 Polarity)');
+    if (!name) return;
+    const code = name.split(' ').pop()?.toUpperCase() || `T_${Date.now()}`;
+    const color = `#${Math.floor(Math.random()*16777215).toString(16).padStart(6, '0')}`;
+    await api.addClass({ name, code, color });
+    loadClasses();
   };
 
-  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    setIsUploading(true);
-    try {
-      const newSample = await api.uploadSample(file);
-      setSamples([newSample, ...samples]);
-    } catch (error) {
-      alert('上传失败，请确保后台服务器运行在3001端口');
-    } finally {
-      setIsUploading(false);
-      if (fileInputRef.current) fileInputRef.current.value = '';
-    }
+  const handleDelete = async (id: string) => {
+    if (!confirm('确认删除该样本吗？')) return;
+    await api.deleteSample(id);
+    setSelectedIds(prev => { const next = new Set(prev); next.delete(id); return next; });
+    loadData();
   };
 
-  const filteredSamples = samples.filter(s => s.filename.toLowerCase().includes(searchTerm.toLowerCase()));
+  const filteredSamples = samples.filter(s => {
+    const matchSearch = s.filename.toLowerCase().includes(searchTerm.toLowerCase());
+    const matchLine = filters.lines.length === 0 || filters.lines.includes(s.line);
+    const matchProcess = filters.processes.length === 0 || filters.processes.includes(s.process);
+    const matchDevice = filters.devices.length === 0 || filters.devices.includes(s.device);
+    const matchDefect = filters.defects.length === 0 || s.defects.some(d => filters.defects.includes(d));
+    return matchSearch && matchLine && matchProcess && matchDevice && matchDefect;
+  });
+
+  const toggleSelectAll = () => {
+    if (selectedIds.size === filteredSamples.length && filteredSamples.length > 0) setSelectedIds(new Set());
+    else setSelectedIds(new Set(filteredSamples.map(s => s.id)));
+  };
+
+  const toggleSelect = (id: string) => {
+    const next = new Set(selectedIds);
+    if (next.has(id)) next.delete(id); else next.add(id);
+    setSelectedIds(next);
+  };
 
   if (viewMode === 'editor' && selectedSample) {
-    return <RealAnnotationEditor sample={selectedSample} onBack={() => { setViewMode('list'); loadData(); }} />;
+    return <RealAnnotationEditor sample={selectedSample} globalClasses={classes} onBack={() => { setViewMode('list'); loadData(); }} />;
   }
 
   return (
-    <div className="flex flex-col h-full space-y-6 animate-in fade-in duration-500">
-      {/* 字典展示区 */}
-      <div className="bg-indigo-50 border border-indigo-100 rounded-lg p-3 flex items-center gap-3 text-sm text-indigo-900 shadow-sm">
-        <Database className="w-4 h-4 text-indigo-600" />
-        <span className="font-semibold">当前全局缺陷定义:</span>
-        <div className="flex gap-2">
-          {GLOBAL_CLASSES.map(cls => (
-            <span key={cls.id} className="px-2 py-0.5 bg-white rounded border border-indigo-200 text-xs font-mono">{cls.name}</span>
-          ))}
+    <div className="flex flex-col h-full space-y-6 animate-in fade-in duration-500 relative">
+      <div className="bg-indigo-50 border border-indigo-100 rounded-lg p-3 flex items-center justify-between shadow-sm">
+        <div className="flex items-center gap-3 text-sm text-indigo-900 overflow-x-auto">
+          <Database className="w-4 h-4 text-indigo-600 shrink-0" />
+          <span className="font-semibold shrink-0">当前全局缺陷定义:</span>
+          <div className="flex gap-2">
+            {classes.map(cls => (
+              <span key={cls.id} style={{ borderColor: cls.color, color: cls.color }} className="px-2 py-0.5 bg-white rounded border text-xs font-bold whitespace-nowrap">{cls.name}</span>
+            ))}
+          </div>
         </div>
+        <button onClick={handleAddClass} className="shrink-0 flex items-center px-3 py-1 bg-white border border-indigo-200 text-indigo-600 rounded text-xs font-bold hover:bg-indigo-600 hover:text-white transition-colors ml-4">
+          <Plus className="w-3 h-3 mr-1" /> 新增缺陷类型
+        </button>
       </div>
 
-      {/* 真实上传区 */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        <input type="file" ref={fileInputRef} className="hidden" accept="image/*" onChange={handleFileUpload} />
-        <div onClick={() => fileInputRef.current?.click()} className="border-2 border-dashed border-slate-300 rounded-xl p-6 flex flex-col items-center justify-center text-slate-500 bg-slate-50/50 hover:bg-slate-50 transition-colors cursor-pointer group">
-          {isUploading ? <Loader2 className="w-8 h-8 mb-2 text-indigo-600 animate-spin" /> : <Upload className="w-8 h-8 mb-2 text-slate-400 group-hover:text-indigo-600" />}
-          <span className="font-medium text-slate-700">{isUploading ? '正在保存至 D:\\AOIplatform\\images...' : '上传本地图片'}</span>
-        </div>
-        <div className="border-2 border-dashed border-slate-300 rounded-xl p-6 flex flex-col items-center justify-center text-slate-500 bg-slate-50/50 hover:bg-slate-50 transition-colors cursor-not-allowed opacity-60">
-          <FileUp className="w-8 h-8 mb-2 text-slate-400" />
-          <span className="font-medium text-slate-700">导入 Zip (待实现)</span>
-        </div>
+      <div className="flex items-center gap-4">
+        <button onClick={() => setUploadMode('batch')} className="flex-1 border-2 border-dashed border-slate-300 rounded-xl py-4 flex flex-col items-center justify-center text-slate-500 bg-slate-50 hover:bg-slate-100 transition-colors cursor-pointer group">
+          <Upload className="w-6 h-6 mb-2 text-slate-400 group-hover:text-indigo-600" />
+          <span className="font-medium text-slate-700">批量上传本地图片</span>
+        </button>
+        <button onClick={() => setUploadMode('zip')} className="flex-1 border-2 border-dashed border-slate-300 rounded-xl py-4 flex flex-col items-center justify-center text-slate-500 bg-slate-50 hover:bg-slate-100 transition-colors cursor-pointer group">
+          <FileUp className="w-6 h-6 mb-2 text-slate-400 group-hover:text-indigo-600" />
+          <span className="font-medium text-slate-700">导入 YOLO 格式 ZIP 压缩包</span>
+        </button>
       </div>
 
-      {/* 数据列表 */}
-      <div className="bg-white rounded-xl shadow-sm border border-slate-200 flex flex-col flex-1 overflow-hidden">
-        <div className="p-4 border-b border-slate-100 flex items-center gap-3 bg-slate-50/30">
-          <div className="relative">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-            <input type="text" placeholder="搜索文件名..." className="pl-9 pr-3 py-1.5 text-sm border border-slate-300 rounded-md focus:ring-2 focus:ring-indigo-500" value={searchTerm} onChange={e => setSearchTerm(e.target.value)} />
+      <div className="bg-white rounded-xl shadow-sm border border-slate-200 flex flex-col flex-1 overflow-hidden relative">
+        <div className="p-4 border-b border-slate-100 flex items-center justify-between gap-3 bg-slate-50/30">
+          <div className="flex items-center gap-3">
+             <div className="relative">
+               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+               <input type="text" placeholder="搜索文件名..." className="pl-9 pr-3 py-1.5 text-sm border border-slate-300 rounded-md focus:ring-2 focus:ring-indigo-500" value={searchTerm} onChange={e => setSearchTerm(e.target.value)} />
+             </div>
+             <button onClick={() => setShowFilters(!showFilters)} className={`px-3 py-1.5 text-sm border rounded-md flex items-center transition-colors ${showFilters ? 'bg-indigo-100 border-indigo-300 text-indigo-700' : 'bg-white border-slate-300 text-slate-600 hover:bg-slate-50'}`}>
+                <Filter className="w-4 h-4 mr-2" /> 多条件筛选
+             </button>
+          </div>
+          
+          <div className="flex items-center gap-3">
+             {selectedIds.size > 0 && <span className="text-sm text-indigo-600 font-bold bg-indigo-50 px-3 py-1 rounded-full">已选 {selectedIds.size} 项</span>}
+             <button disabled={selectedIds.size === 0} onClick={() => setDatasetModalOpen(true)} className="px-4 py-1.5 text-sm font-bold bg-indigo-600 text-white rounded-md flex items-center shadow-sm hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed">
+                <FolderArchive className="w-4 h-4 mr-2" /> 制作数据集
+             </button>
           </div>
         </div>
 
+        {showFilters && (
+          <div className="p-4 bg-slate-50 border-b border-slate-200 grid grid-cols-4 gap-6">
+            <div>
+              <p className="text-xs font-bold text-slate-500 mb-2">产品线 (LineType)</p>
+              <div className="flex flex-col gap-2">{LINE_TYPES.map(l => (
+                   <label key={l} className="flex items-center text-sm gap-1 cursor-pointer">
+                     <input type="checkbox" checked={filters.lines.includes(l)} onChange={(e) => setFilters(f => ({ ...f, lines: e.target.checked ? [...f.lines, l] : f.lines.filter(x => x !== l) }))} className="text-indigo-600 rounded" /> {l}
+                   </label>
+                ))}</div>
+            </div>
+            <div>
+              <p className="text-xs font-bold text-slate-500 mb-2">工序 (ProcessType)</p>
+              <div className="flex flex-col gap-2">{PROCESS_TYPES.map(p => (
+                   <label key={p} className="flex items-center text-sm gap-1 cursor-pointer">
+                     <input type="checkbox" checked={filters.processes.includes(p)} onChange={(e) => setFilters(f => ({ ...f, processes: e.target.checked ? [...f.processes, p] : f.processes.filter(x => x !== p) }))} className="text-indigo-600 rounded" /> {p}
+                   </label>
+                ))}</div>
+            </div>
+            <div>
+              <p className="text-xs font-bold text-slate-500 mb-2">设备 (Device)</p>
+              <div className="flex flex-col gap-2">{DEVICE_BRANDS.map(d => (
+                   <label key={d} className="flex items-center text-sm gap-1 cursor-pointer">
+                     <input type="checkbox" checked={filters.devices.includes(d)} onChange={(e) => setFilters(f => ({ ...f, devices: e.target.checked ? [...f.devices, d] : f.devices.filter(x => x !== d) }))} className="text-indigo-600 rounded" /> {d}
+                   </label>
+                ))}</div>
+            </div>
+            <div>
+              <p className="text-xs font-bold text-slate-500 mb-2">包含缺陷</p>
+              <div className="flex flex-col gap-2">{classes.map(c => (
+                   <label key={c.id} className="flex items-center text-sm gap-1 cursor-pointer">
+                     <input type="checkbox" checked={filters.defects.includes(c.code)} onChange={(e) => setFilters(f => ({ ...f, defects: e.target.checked ? [...f.defects, c.code] : f.defects.filter(x => x !== c.code) }))} className="text-indigo-600 rounded" /> {c.name.split(' ')[0]}
+                   </label>
+                ))}</div>
+            </div>
+          </div>
+        )}
+
         <div className="flex-1 overflow-auto">
           <table className="w-full text-left text-sm">
-            <thead className="bg-slate-50 text-slate-500 font-medium sticky top-0 z-10">
+            <thead className="bg-slate-50 text-slate-500 font-medium sticky top-0 z-10 border-b border-slate-200 shadow-sm">
               <tr>
-                <th className="px-6 py-3 border-b">预览</th>
-                <th className="px-6 py-3 border-b">文件名</th>
-                <th className="px-6 py-3 border-b">标注框数量</th>
-                <th className="px-6 py-3 border-b">操作</th>
+                <th className="px-4 py-3 w-10">
+                   <button onClick={toggleSelectAll} className="text-slate-400 hover:text-indigo-600 flex items-center justify-center">
+                     {selectedIds.size === filteredSamples.length && filteredSamples.length > 0 ? <CheckSquare className="w-5 h-5" /> : <Square className="w-5 h-5" />}
+                   </button>
+                </th>
+                <th className="px-6 py-3">预览</th>
+                <th className="px-6 py-3">文件名</th>
+                <th className="px-6 py-3">属性信息</th>
+                <th className="px-6 py-3">标注信息</th>
+                <th className="px-6 py-3">操作</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {filteredSamples.map((sample) => (
-                <tr key={sample.id} className="hover:bg-slate-50">
-                  <td className="px-6 py-3"><img src={sample.thumbnailUrl} alt="thumbnail" className="w-12 h-12 rounded object-cover border" /></td>
-                  <td className="px-6 py-3 font-medium text-slate-900">{sample.filename}</td>
-                  <td className="px-6 py-3 font-mono text-slate-600">{sample.annotations?.length || 0} 个目标</td>
+              {samples.length === 0 ? (
+                <tr className="bg-amber-50/40">
+                  <td className="px-4 py-3"><Square className="w-5 h-5 text-slate-300" /></td>
+                  <td className="px-6 py-3"><div className="w-12 h-12 rounded bg-slate-200 border border-slate-300 flex items-center justify-center"><ImageIcon className="w-5 h-5 text-slate-400"/></div></td>
+                  <td className="px-6 py-3 font-medium text-slate-500">示例_请先在上方上传真实数据.jpg</td>
+                  <td className="px-6 py-3 text-xs text-slate-400">线体: 示例 <br/> 工序: 示例 <br/> 设备: 示例</td>
+                  <td className="px-6 py-3"><span className="px-2 py-0.5 rounded text-[10px] bg-slate-200 text-slate-500">示例状态</span></td>
+                  <td className="px-6 py-3 text-xs text-slate-400">仅供演示</td>
+                </tr>
+              ) : filteredSamples.length === 0 ? (
+                <tr><td colSpan={6} className="text-center py-12 text-slate-400">没有符合条件的样本数据</td></tr>
+              ) : filteredSamples.map((sample) => (
+                <tr key={sample.id} className={`hover:bg-slate-50 transition-colors ${selectedIds.has(sample.id) ? 'bg-indigo-50/30' : ''}`}>
+                  <td className="px-4 py-3">
+                     <button onClick={() => toggleSelect(sample.id)} className="text-slate-400 hover:text-indigo-600 flex items-center justify-center">
+                       {selectedIds.has(sample.id) ? <CheckSquare className="w-5 h-5 text-indigo-600" /> : <Square className="w-5 h-5" />}
+                     </button>
+                  </td>
+                  <td className="px-6 py-3"><img src={sample.thumbnailUrl} alt="thumbnail" className="w-12 h-12 rounded object-cover border bg-slate-100" /></td>
+                  <td className="px-6 py-3 font-medium text-slate-900 break-all w-64">{sample.filename}</td>
                   <td className="px-6 py-3">
-                    <button onClick={() => { setSelectedSample(sample); setViewMode('editor'); }} className="text-indigo-600 hover:text-indigo-800 font-medium px-3 py-1 bg-indigo-50 rounded">去标注 (画框)</button>
+                     <div className="flex flex-col gap-1 text-xs text-slate-500">
+                        <span>线体: {sample.line}</span>
+                        <span>工序: {sample.process}</span>
+                        <span>设备: {sample.device}</span>
+                     </div>
+                  </td>
+                  <td className="px-6 py-3">
+                     <div className="flex flex-wrap gap-1">
+                        {sample.defects?.length > 0 ? sample.defects.map(d => {
+                           const c = classes.find(cls => cls.code === d);
+                           return <span key={d} style={{ backgroundColor: c?.color || '#cbd5e1', color: '#fff' }} className="px-2 py-0.5 rounded text-[10px] font-bold">{c ? c.name.split(' ')[0] : d}</span>
+                        }) : <span className="text-slate-400 italic">未标注</span>}
+                     </div>
+                  </td>
+                  <td className="px-6 py-3">
+                    <div className="flex items-center gap-2">
+                      <button onClick={() => { setSelectedSample(sample); setViewMode('editor'); }} className="text-indigo-600 hover:text-indigo-800 font-medium px-3 py-1 bg-indigo-50 rounded text-xs">标注</button>
+                      <button onClick={() => handleDelete(sample.id)} className="text-red-500 hover:text-red-700 hover:bg-red-50 p-1.5 rounded"><Trash2 className="w-4 h-4" /></button>
+                    </div>
                   </td>
                 </tr>
               ))}
-              {filteredSamples.length === 0 && (<tr><td colSpan={4} className="text-center py-8 text-slate-400">本地暂无数据</td></tr>)}
             </tbody>
           </table>
         </div>
+      </div>
+
+      {uploadMode !== 'none' && <UploadModal mode={uploadMode} onClose={() => setUploadMode('none')} onRefresh={loadData} />}
+      {datasetModalOpen && <DatasetModal selectedIds={Array.from(selectedIds)} onClose={() => setDatasetModalOpen(false)} onSuccess={() => { setDatasetModalOpen(false); setSelectedIds(new Set()); alert('数据集制作成功！'); }} />}
+    </div>
+  );
+};
+
+const UploadModal = ({ mode, onClose, onRefresh }: { mode: 'batch'|'zip', onClose: () => void, onRefresh: () => void }) => {
+  const [loading, setLoading] = useState(false);
+  const [meta, setMeta] = useState({ device: DEVICE_BRANDS[0], process: PROCESS_TYPES[0], line: LINE_TYPES[0] });
+  const [files, setFiles] = useState<FileList | null>(null);
+  
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!files || files.length === 0) return alert('请选择文件');
+    setLoading(true);
+    try {
+      if (mode === 'batch') await api.uploadBatch(files, meta);
+      else await api.uploadZip(files[0], meta);
+      onRefresh();
+      onClose();
+    } catch (e) { alert('上传失败'); } finally { setLoading(false); }
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
+      <div className="bg-white rounded-xl shadow-xl w-full max-w-md p-6">
+        <h3 className="text-lg font-bold text-slate-900 mb-4">{mode === 'batch' ? '批量上传本地图片' : '导入 YOLO ZIP'}</h3>
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-xs font-bold text-slate-500 mb-1">产品线 (LineType)</label>
+              <select className="w-full border rounded-lg px-3 py-2 text-sm" value={meta.line} onChange={e=>setMeta({...meta, line: e.target.value})}>
+                {LINE_TYPES.map(o => <option key={o} value={o}>{o}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs font-bold text-slate-500 mb-1">工序 (ProcessType)</label>
+              <select className="w-full border rounded-lg px-3 py-2 text-sm" value={meta.process} onChange={e=>setMeta({...meta, process: e.target.value})}>
+                {PROCESS_TYPES.map(o => <option key={o} value={o}>{o}</option>)}
+              </select>
+            </div>
+          </div>
+          <div>
+            <label className="block text-xs font-bold text-slate-500 mb-1">设备类型 (DeviceBrand)</label>
+            <select className="w-full border rounded-lg px-3 py-2 text-sm" value={meta.device} onChange={e=>setMeta({...meta, device: e.target.value})}>
+              {DEVICE_BRANDS.map(o => <option key={o} value={o}>{o}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className="block text-xs font-bold text-slate-500 mb-1">选择文件</label>
+            <input type="file" required multiple={mode === 'batch'} accept={mode === 'zip' ? '.zip' : 'image/*'} className="w-full border rounded-lg px-3 py-2 text-sm" onChange={e => setFiles(e.target.files)} />
+          </div>
+          <div className="flex justify-end gap-3 mt-6">
+            <button type="button" onClick={onClose} className="px-4 py-2 text-slate-600 hover:bg-slate-100 rounded text-sm">取消</button>
+            <button type="submit" disabled={loading} className="px-4 py-2 bg-indigo-600 text-white hover:bg-indigo-700 rounded text-sm flex items-center">
+              {loading ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : null} {loading ? '处理中...' : '确认上传'}
+            </button>
+          </div>
+        </form>
       </div>
     </div>
   );
 };
 
-// 真实的 Canvas 画框标注器
-const RealAnnotationEditor: React.FC<{ sample: Sample, onBack: () => void }> = ({ sample, onBack }) => {
+const DatasetModal = ({ selectedIds, onClose, onSuccess }: { selectedIds: string[], onClose: () => void, onSuccess: () => void }) => {
+  const [formData, setFormData] = useState({ name: '', version: 'v1.0.0', date: new Date().toISOString().split('T')[0] });
+  const [loading, setLoading] = useState(false);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setLoading(true);
+    try {
+      await api.createDataset({ ...formData, sampleIds: selectedIds });
+      onSuccess();
+    } catch(e) { alert('创建失败'); } finally { setLoading(false); }
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+      <div className="bg-white rounded-xl shadow-xl w-full max-w-md p-6 border-t-4 border-indigo-600">
+        <h3 className="text-lg font-bold text-slate-900 mb-2">制作数据集</h3>
+        <p className="text-sm text-slate-500 mb-4">将当前选中的 {selectedIds.length} 张样本打包固化至数据库。</p>
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <div><label className="block text-xs font-bold text-slate-700 mb-1">数据集命名</label><input required className="w-full border rounded-lg px-3 py-2 text-sm" value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} /></div>
+          <div><label className="block text-xs font-bold text-slate-700 mb-1">版本号</label><input required className="w-full border rounded-lg px-3 py-2 text-sm" value={formData.version} onChange={e => setFormData({...formData, version: e.target.value})} /></div>
+          <div><label className="block text-xs font-bold text-slate-700 mb-1">创建日期</label><input type="date" required className="w-full border rounded-lg px-3 py-2 text-sm" value={formData.date} onChange={e => setFormData({...formData, date: e.target.value})} /></div>
+          <div className="flex justify-end gap-3 mt-6">
+            <button type="button" onClick={onClose} className="px-4 py-2 text-slate-600 hover:bg-slate-100 rounded text-sm">取消</button>
+            <button type="submit" disabled={loading} className="px-4 py-2 bg-indigo-600 text-white hover:bg-indigo-700 rounded text-sm flex items-center">确认生成</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  )
+}
+
+// 修正：采用内部分辨率和CSS等比缩放，防止图片拉伸或坐标错位
+const RealAnnotationEditor: React.FC<{ sample: Sample, globalClasses: GlobalClass[], onBack: () => void }> = ({ sample, globalClasses, onBack }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const containerRef = useRef<HTMLDivElement>(null);
   
   const [annotations, setAnnotations] = useState<Annotation[]>(sample.annotations || []);
-  const [activeClass, setActiveClass] = useState<DefectType>(DefectType.SCRATCH);
+  const [activeClass, setActiveClass] = useState<string>(globalClasses[0]?.code || 'UNKNOWN');
   const [isDrawing, setIsDrawing] = useState(false);
   const [startPos, setStartPos] = useState({ x: 0, y: 0 });
   const [currentPos, setCurrentPos] = useState({ x: 0, y: 0 });
   const [imgObj, setImgObj] = useState<HTMLImageElement | null>(null);
 
-  // 加载图片并绘制
   useEffect(() => {
     const img = new Image();
     img.src = sample.thumbnailUrl;
     img.onload = () => {
-      setImgObj(img);
-      redraw(img, annotations, null);
+      // 设置 Canvas 内部分辨率为真实图片分辨率
+      if (canvasRef.current) {
+         canvasRef.current.width = img.naturalWidth;
+         canvasRef.current.height = img.naturalHeight;
+      }
+      setImgObj(img); 
+      redraw(img, annotations, null); 
     };
   }, [sample.thumbnailUrl]);
 
-  // 重绘 Canvas
   const redraw = (img: HTMLImageElement | null, rects: Annotation[], drawingRect: any) => {
     const canvas = canvasRef.current;
     if (!canvas || !img) return;
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    // 清空并绘制底图
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
 
-    // 绘制已保存的框
     rects.forEach(rect => {
-      ctx.strokeStyle = '#eab308'; // 黄色框
-      ctx.lineWidth = 2;
+      const cls = globalClasses.find(c => c.code === rect.label);
+      const color = cls ? cls.color : '#eab308';
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 3;
       ctx.strokeRect(rect.bbox.x, rect.bbox.y, rect.bbox.width, rect.bbox.height);
-      ctx.fillStyle = '#eab308';
-      ctx.font = '12px Arial';
-      ctx.fillText(rect.label, rect.bbox.x, rect.bbox.y - 5);
+      ctx.fillStyle = color;
+      ctx.font = 'bold 24px Arial';
+      ctx.fillText(cls ? cls.name.split(' ')[0] : rect.label, rect.bbox.x, rect.bbox.y > 25 ? rect.bbox.y - 10 : rect.bbox.y + 25);
     });
 
-    // 绘制正在画的框
     if (drawingRect) {
-      ctx.strokeStyle = '#ef4444'; // 红色绘制中
-      ctx.lineWidth = 2;
-      ctx.setLineDash([5, 5]);
+      const activeCls = globalClasses.find(c => c.code === activeClass);
+      ctx.strokeStyle = activeCls ? activeCls.color : '#ef4444';
+      ctx.lineWidth = 3;
+      ctx.setLineDash([10, 10]);
       ctx.strokeRect(drawingRect.x, drawingRect.y, drawingRect.width, drawingRect.height);
       ctx.setLineDash([]);
     }
@@ -172,31 +374,24 @@ const RealAnnotationEditor: React.FC<{ sample: Sample, onBack: () => void }> = (
       } : null;
       redraw(imgObj, annotations, drawingRect);
     }
-  }, [annotations, isDrawing, currentPos, imgObj]);
+  }, [annotations, isDrawing, currentPos, imgObj, activeClass]);
 
   const getMousePos = (e: React.MouseEvent) => {
     const canvas = canvasRef.current;
     if (!canvas) return { x: 0, y: 0 };
     const rect = canvas.getBoundingClientRect();
+    // 换算当前 CSS 尺寸与 Canvas 实际内部分辨率的比例
     const scaleX = canvas.width / rect.width;
     const scaleY = canvas.height / rect.height;
-    return {
-      x: (e.clientX - rect.left) * scaleX,
-      y: (e.clientY - rect.top) * scaleY
-    };
+    return { x: (e.clientX - rect.left) * scaleX, y: (e.clientY - rect.top) * scaleY };
   };
 
   const handleMouseDown = (e: React.MouseEvent) => {
     const pos = getMousePos(e);
-    setStartPos(pos);
-    setCurrentPos(pos);
-    setIsDrawing(true);
+    setStartPos(pos); setCurrentPos(pos); setIsDrawing(true);
   };
 
-  const handleMouseMove = (e: React.MouseEvent) => {
-    if (!isDrawing) return;
-    setCurrentPos(getMousePos(e));
-  };
+  const handleMouseMove = (e: React.MouseEvent) => { if (isDrawing) setCurrentPos(getMousePos(e)); };
 
   const handleMouseUp = () => {
     if (!isDrawing) return;
@@ -205,16 +400,12 @@ const RealAnnotationEditor: React.FC<{ sample: Sample, onBack: () => void }> = (
     const width = Math.abs(currentPos.x - startPos.x);
     const height = Math.abs(currentPos.y - startPos.y);
     
-    // 忽略太小的点击
-    if (width > 5 && height > 5) {
+    // 忽略过小的绘制防误触 (考虑到真实分辨率可能很大，阈值设为20px)
+    if (width > 20 && height > 20) {
       const newAnnotation: Annotation = {
         id: `ann-${Date.now()}`,
         label: activeClass,
-        bbox: {
-          x: Math.min(startPos.x, currentPos.x),
-          y: Math.min(startPos.y, currentPos.y),
-          width, height
-        }
+        bbox: { x: Math.min(startPos.x, currentPos.x), y: Math.min(startPos.y, currentPos.y), width, height }
       };
       setAnnotations([...annotations, newAnnotation]);
     }
@@ -230,7 +421,7 @@ const RealAnnotationEditor: React.FC<{ sample: Sample, onBack: () => void }> = (
       <div className="h-14 bg-white border-b border-slate-200 flex items-center justify-between px-4">
          <div className="flex items-center gap-4">
            <button onClick={onBack} className="p-2 hover:bg-slate-100 rounded-lg text-slate-500"><ArrowLeft className="w-5 h-5"/></button>
-           <span className="font-bold text-slate-800">{sample.filename}</span>
+           <span className="font-bold text-slate-800 break-all">{sample.filename}</span>
          </div>
          <div className="flex items-center gap-3">
            <button onClick={() => setAnnotations([])} className="px-3 py-1.5 text-slate-600 hover:bg-slate-100 rounded text-sm flex items-center"><Trash2 className="w-4 h-4 mr-1"/> 清空</button>
@@ -239,34 +430,33 @@ const RealAnnotationEditor: React.FC<{ sample: Sample, onBack: () => void }> = (
       </div>
       
       <div className="flex flex-1 overflow-hidden">
-        {/* 左侧工具栏 */}
-        <div className="w-48 bg-white border-r border-slate-200 p-4 flex flex-col gap-2">
-           <span className="text-xs font-bold text-slate-500 mb-2 uppercase">选择当前标签</span>
-           {GLOBAL_CLASSES.map(cls => (
+        <div className="w-56 bg-white border-r border-slate-200 p-4 flex flex-col gap-2 overflow-y-auto">
+           <span className="text-xs font-bold text-slate-500 mb-2 uppercase">选择当前绘制标签</span>
+           {globalClasses.map(cls => (
              <button 
                key={cls.id}
-               onClick={() => setActiveClass(cls.code as DefectType)}
-               className={`px-3 py-2 rounded text-left text-sm flex items-center ${activeClass === cls.code ? 'bg-indigo-50 text-indigo-700 border border-indigo-200 font-bold' : 'text-slate-600 hover:bg-slate-50 border border-transparent'}`}
+               onClick={() => setActiveClass(cls.code)}
+               style={activeClass === cls.code ? { borderColor: cls.color, backgroundColor: `${cls.color}15`, color: cls.color } : {}}
+               className={`px-3 py-2 rounded text-left text-sm flex items-center font-bold ${activeClass === cls.code ? 'border-2' : 'text-slate-600 hover:bg-slate-50 border-2 border-transparent'}`}
              >
-               <Tag className="w-4 h-4 mr-2"/> {cls.name.split(' ')[0]}
+               <Tag className="w-4 h-4 mr-2" style={{ color: cls.color }} /> {cls.name}
              </button>
            ))}
         </div>
 
-        {/* 画布区 */}
-        <div className="flex-1 bg-slate-200 flex items-center justify-center p-6 overflow-auto" ref={containerRef}>
-            <div className="relative shadow-xl bg-white cursor-crosshair border-2 border-slate-300">
+        <div className="flex-1 bg-slate-200 flex items-center justify-center p-6 overflow-hidden">
+            <div className="relative shadow-xl bg-white cursor-crosshair border-2 border-slate-300 w-full h-full flex items-center justify-center bg-[url('data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAoAAAAKCAYAAACNMs+9AAAAAXNSR0IArs4c6QAAACVJREFUKFNjZCASMDKhuP///1/xM2ZmgIQZYRQYNSC1DAyUoQEA2m0H+Xg7rA0AAAAASUVORK5CYII=')]">
+               {/* 纯CSS等比例自适应缩放 */}
                <canvas 
                  ref={canvasRef}
-                 width={800} 
-                 height={600} 
                  onMouseDown={handleMouseDown}
                  onMouseMove={handleMouseMove}
                  onMouseUp={handleMouseUp}
                  onMouseLeave={handleMouseUp}
-                 style={{ display: 'block', maxWidth: '100%', height: 'auto' }}
+                 className="max-w-full max-h-full object-contain pointer-events-auto"
+                 style={{ display: 'block' }}
                />
-               {!imgObj && <div className="absolute inset-0 flex items-center justify-center text-slate-400">Loading Image...</div>}
+               {!imgObj && <div className="absolute inset-0 flex items-center justify-center text-slate-400 bg-white">Loading Image...</div>}
             </div>
         </div>
       </div>
