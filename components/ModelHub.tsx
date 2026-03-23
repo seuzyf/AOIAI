@@ -35,7 +35,7 @@ export const ModelHub: React.FC = () => {
         </div>
         <button onClick={() => setShowUploadModal(true)} className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg text-sm font-medium flex items-center shadow-sm">
           <FolderUp className="w-4 h-4 mr-2" />
-          上传真实模型 (存入D盘)
+          上传模型
         </button>
       </div>
 
