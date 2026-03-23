@@ -73,6 +73,12 @@ app.post('/api/classes', (req, res) => {
   writeDB('classes.json', classes);
   res.json(newClass);
 });
+app.delete('/api/classes/:id', (req, res) => {
+  let classes = readDB('classes.json');
+  classes = classes.filter(c => String(c.id) !== req.params.id);
+  writeDB('classes.json', classes);
+  res.json({ success: true });
+});
 
 app.get('/api/samples', (req, res) => res.json(readDB('samples.json')));
 app.delete('/api/samples/:id', (req, res) => {
@@ -210,7 +216,6 @@ app.put('/api/samples/:id/annotate', (req, res) => {
   }
 });
 
-// 【数据集】增加提取样本属性功能
 app.post('/api/datasets/create', (req, res) => {
   const { name, sampleIds, version, date } = req.body;
   const datasets = readDB('datasets.json');
@@ -242,6 +247,56 @@ app.post('/api/datasets/delete', (req, res) => {
   datasets = datasets.filter(d => !ids.includes(d.id));
   writeDB('datasets.json', datasets);
   res.json({ success: true });
+});
+
+// 新增：打包下载数据集 ZIP
+app.get('/api/datasets/:id/download', (req, res) => {
+  const datasets = readDB('datasets.json');
+  const samples = readDB('samples.json');
+  const classes = readDB('classes.json');
+
+  const ds = datasets.find(d => d.id === req.params.id);
+  if (!ds) return res.status(404).json({ error: '数据集不存在' });
+
+  const zip = new admZip();
+  const dsSamples = samples.filter(s => ds.sampleIds.includes(s.id));
+
+  // 写入 classes.txt
+  const classesText = classes.map(c => c.code).join('\n');
+  zip.addFile('classes.txt', Buffer.from(classesText, 'utf8'));
+
+  // 遍历样本提取图片和生成对应坐标文件
+  dsSamples.forEach(sample => {
+    const imgFilename = path.basename(sample.thumbnailUrl);
+    const imgPath = path.join(IMG_DIR, imgFilename);
+    let imgDim = { width: 1, height: 1 };
+    
+    if (fs.existsSync(imgPath)) {
+       zip.addLocalFile(imgPath, 'images');
+       try { imgDim = sizeOf(imgPath); } catch(e) {}
+    }
+
+    const baseName = path.parse(sample.filename).name;
+    let labelContent = '';
+    (sample.annotations || []).forEach(ann => {
+      const clsIdx = classes.findIndex(c => c.code === ann.label);
+      if (clsIdx > -1) {
+        const x_c = (ann.bbox.x + ann.bbox.width / 2) / imgDim.width;
+        const y_c = (ann.bbox.y + ann.bbox.height / 2) / imgDim.height;
+        const w = ann.bbox.width / imgDim.width;
+        const h = ann.bbox.height / imgDim.height;
+        
+        const norm = (val) => Math.max(0, Math.min(1, val)).toFixed(6);
+        labelContent += `${clsIdx} ${norm(x_c)} ${norm(y_c)} ${norm(w)} ${norm(h)}\n`;
+      }
+    });
+    zip.addFile(`labels/${baseName}.txt`, Buffer.from(labelContent, 'utf8'));
+  });
+
+  const zipBuffer = zip.toBuffer();
+  res.set('Content-Type', 'application/zip');
+  res.set('Content-Disposition', `attachment; filename*=UTF-8''${encodeURIComponent(ds.name)}.zip`);
+  res.send(zipBuffer);
 });
 
 app.get('/api/models', (req, res) => res.json(readDB('models.json')));

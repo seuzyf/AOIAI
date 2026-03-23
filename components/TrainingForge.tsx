@@ -14,14 +14,36 @@ import {
   HardDrive,
   ExternalLink,
   Terminal as TerminalIcon,
-  Download
+  Download,
+  FolderArchive,
+  CheckSquare,
+  Square,
+  CheckCircle
 } from 'lucide-react';
 import { TERMINAL_LOGS } from '../constants';
-import { TerminalLog } from '../types';
+import { TerminalLog, Dataset } from '../types';
+import { api } from '../api';
 
 interface TrainingForgeProps {
   onNavigateToSampleHub: () => void;
 }
+
+const BASE_MODELS = {
+  detection: [
+    { id: 'yolov8s', name: 'YOLOv8-Industrial-S', desc: '速度极快，适合轻量级部署与常规表面缺陷', params: '11.1M' },
+    { id: 'yolov8m', name: 'YOLOv8-Industrial-M', desc: '精度与速度均衡，适合复杂背景下的缺陷特征提取', params: '25.8M' },
+    { id: 'rtdetr', name: 'RT-DETR-L', desc: 'Transformer架构，高精度抗干扰，适合密集小缺陷', params: '32.0M' }
+  ],
+  classification: [
+    { id: 'resnet50', name: 'ResNet50-AOI', desc: '工业二分类经典架构，稳定可靠的良品判定基座', params: '23.5M' },
+    { id: 'efficientnet', name: 'EfficientNet-B3', desc: '高精度参数比，适合细粒度的微小差异判定', params: '12.0M' },
+    { id: 'mobilenet', name: 'MobileNetV3-L', desc: '极低算力需求，适合边缘低功耗设备', params: '5.4M' }
+  ],
+  segmentation: [
+    { id: 'yolov8seg', name: 'YOLOv8-Seg-Base', desc: '实时实例分割，边缘贴合度高，支持快速推理', params: '11.8M' },
+    { id: 'deeplabv3', name: 'DeepLabV3+', desc: '语义分割标杆，适合大面积连续性缺陷提取', params: '43.0M' }
+  ]
+};
 
 export const TrainingForge: React.FC<TrainingForgeProps> = ({ onNavigateToSampleHub }) => {
   const [currentStep, setCurrentStep] = useState(0);
@@ -32,7 +54,28 @@ export const TrainingForge: React.FC<TrainingForgeProps> = ({ onNavigateToSample
 
   // Form State
   const [scenario, setScenario] = useState<'detection' | 'classification' | 'segmentation' | null>(null);
-  const [hardware, setHardware] = useState<'gpu' | 'cpu' | null>(null);
+  const [baseModel, setBaseModel] = useState<string | null>(null);
+  const [hardware, setHardware] = useState<'gpu_high' | 'gpu_low' | 'cpu' | null>(null);
+  const [datasets, setDatasets] = useState<Dataset[]>([]);
+  const [selectedDatasetIds, setSelectedDatasetIds] = useState<Set<string>>(new Set());
+  
+  // Params State
+  const [epochs, setEpochs] = useState<number>(300);
+  const [activeConfigTab, setActiveConfigTab] = useState<'aug' | 'hyper'>('aug');
+  
+  // Augmentation State
+  const [augParams, setAugParams] = useState({
+    mosaic: 1.0, mixup: 0.1, degrees: 0.0, perspective: 0.0
+  });
+
+  // Hyperparameters State
+  const [hyperparams, setHyperparams] = useState({
+    lr0: 0.01, lrf: 0.01, momentum: 0.937, weight_decay: 0.0005, warmup_epochs: 3.0, warmup_momentum: 0.8
+  });
+
+  useEffect(() => {
+    api.getDatasets().then(setDatasets).catch(() => {});
+  }, []);
 
   const steps = [
     { title: '场景选型', icon: Target },
@@ -42,7 +85,6 @@ export const TrainingForge: React.FC<TrainingForgeProps> = ({ onNavigateToSample
     { title: '生成交付', icon: Play }
   ];
 
-  // Terminal Simulation
   const logsEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -52,54 +94,85 @@ export const TrainingForge: React.FC<TrainingForgeProps> = ({ onNavigateToSample
         delay += 800 + Math.random() * 500;
         setTimeout(() => {
           setLogs(prev => [...prev, { id: Date.now(), text }]);
-          if (index === TERMINAL_LOGS.length - 1) {
-            setIsFinished(true);
-          }
+          if (index === TERMINAL_LOGS.length - 1) setIsFinished(true);
         }, delay);
       });
     }
   }, [isTraining]);
 
-  useEffect(() => {
-    logsEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [logs]);
+  useEffect(() => { logsEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [logs]);
 
+  const toggleDataset = (id: string) => {
+    const next = new Set(selectedDatasetIds);
+    if (next.has(id)) next.delete(id); else next.add(id);
+    setSelectedDatasetIds(next);
+  };
+
+  const handleScenarioChange = (id: 'detection' | 'classification' | 'segmentation') => {
+    setScenario(id);
+    // 切换场景时，自动默认选中该场景下的第一个基座模型
+    setBaseModel(BASE_MODELS[id][0].id);
+  };
 
   const renderStepContent = () => {
     switch (currentStep) {
-      case 0: // Scenario
+      case 0: // Scenario & Base Model
         return (
           <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
-            <h2 className="text-xl font-semibold text-slate-800">选择应用场景</h2>
+            <h2 className="text-xl font-semibold text-slate-800">选择应用场景与基座模型</h2>
+            
+            {/* 场景选择 */}
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
               {[
-                { id: 'detection', name: '缺陷定位 (Detection)', desc: '识别缺陷位置与类别 (YOLO)', icon: Target },
-                { id: 'classification', name: '良品判定 (Classification)', desc: '整图二分类判定 (VGG)', icon: Check },
-                { id: 'segmentation', name: '图像分割 (Segmentation)', desc: '像素级精细分割 (UNet)', icon: Layers },
+                { id: 'detection', name: '缺陷定位 (Detection)', desc: '识别缺陷位置与类别，输出边界框', icon: Target },
+                { id: 'classification', name: '良品判定 (Classification)', desc: '整图判定，适用于简单NG/OK分类', icon: Check },
+                { id: 'segmentation', name: '图像分割 (Segmentation)', desc: '像素级精细分割，获取缺陷精确轮廓', icon: Layers },
               ].map((item) => (
                 <div 
-                  key={item.id}
-                  onClick={() => setScenario(item.id as any)}
-                  className={`p-6 rounded-xl border-2 cursor-pointer transition-all hover:shadow-md group ${
-                    scenario === item.id 
-                      ? 'border-indigo-600 bg-indigo-50 ring-1 ring-indigo-600' 
-                      : 'border-slate-200 bg-white hover:border-indigo-300'
-                  }`}
+                  key={item.id} 
+                  onClick={() => handleScenarioChange(item.id as any)} 
+                  className={`p-6 rounded-xl border-2 cursor-pointer transition-all hover:shadow-md group flex flex-col ${scenario === item.id ? 'border-indigo-600 bg-indigo-50 ring-1 ring-indigo-600' : 'border-slate-200 bg-white hover:border-indigo-300'}`}
                 >
-                  <div className={`p-3 rounded-lg w-fit mb-4 ${
-                    scenario === item.id ? 'bg-indigo-600 text-white' : 'bg-slate-100 text-slate-500 group-hover:bg-indigo-100 group-hover:text-indigo-600'
-                  }`}>
+                  <div className={`p-3 rounded-lg w-fit mb-4 ${scenario === item.id ? 'bg-indigo-600 text-white' : 'bg-slate-100 text-slate-500 group-hover:bg-indigo-100 group-hover:text-indigo-600'}`}>
                     <item.icon className="w-6 h-6" />
                   </div>
                   <h3 className="font-bold text-slate-800 mb-2">{item.name}</h3>
-                  <p className="text-sm text-slate-500">{item.desc}</p>
+                  <p className="text-sm text-slate-500 mb-4 flex-1">{item.desc}</p>
+                  <div className="pt-3 border-t border-slate-200/50 flex items-center text-xs font-medium text-slate-600">
+                    <BrainCircuit className="w-4 h-4 mr-1.5 text-indigo-500"/>
+                    <span className={scenario === item.id ? 'text-indigo-700 font-bold' : ''}>
+                      提供 {BASE_MODELS[item.id as 'detection' | 'classification' | 'segmentation'].length} 种基座可选
+                    </span>
+                  </div>
                 </div>
               ))}
             </div>
-            {scenario === 'detection' && (
-              <div className="p-4 bg-blue-50 text-blue-800 text-sm rounded-lg border border-blue-100 flex items-center">
-                <BrainCircuit className="w-4 h-4 mr-2" />
-                系统已自动锁定基座模型: <span className="font-bold ml-1">YOLO-Industrial-S</span>
+
+            {/* 模型选择 (当选中场景后展示) */}
+            {scenario && (
+              <div className="mt-8 pt-6 border-t border-slate-200 animate-in fade-in slide-in-from-bottom-2 duration-300">
+                 <h3 className="text-lg font-semibold text-slate-800 mb-4 flex items-center">
+                   <BrainCircuit className="w-5 h-5 mr-2 text-indigo-600" /> 
+                   选择 {scenario === 'detection' ? '缺陷定位' : scenario === 'classification' ? '良品判定' : '图像分割'} 基座模型
+                 </h3>
+                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                   {BASE_MODELS[scenario].map(model => (
+                      <div 
+                        key={model.id} 
+                        onClick={() => setBaseModel(model.id)} 
+                        className={`p-5 rounded-xl border-2 cursor-pointer transition-all hover:shadow-md flex flex-col relative ${baseModel === model.id ? 'border-indigo-600 bg-indigo-50' : 'border-slate-200 bg-white hover:border-indigo-300'}`}
+                      >
+                        <div className="flex justify-between items-start mb-2">
+                           <h4 className={`font-bold text-base ${baseModel === model.id ? 'text-indigo-900' : 'text-slate-800'}`}>{model.name}</h4>
+                           {baseModel === model.id && <CheckCircle className="w-5 h-5 text-indigo-600 absolute top-4 right-4" />}
+                        </div>
+                        <p className="text-xs text-slate-500 mb-4 flex-1 pr-6">{model.desc}</p>
+                        <div className="text-[10px] font-mono bg-white border border-slate-200 text-slate-500 w-fit px-2 py-1 rounded shadow-sm">
+                          模型参数量: <span className="font-bold text-slate-700">{model.params}</span>
+                        </div>
+                      </div>
+                   ))}
+                 </div>
               </div>
             )}
           </div>
@@ -108,37 +181,31 @@ export const TrainingForge: React.FC<TrainingForgeProps> = ({ onNavigateToSample
       case 1: // Hardware
         return (
           <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
-             <h2 className="text-xl font-semibold text-slate-800">目标部署环境</h2>
-             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <div 
-                  onClick={() => setHardware('gpu')}
-                  className={`flex items-center p-6 rounded-xl border-2 cursor-pointer transition-all ${
-                    hardware === 'gpu' ? 'border-indigo-600 bg-indigo-50' : 'border-slate-200 bg-white hover:border-slate-300'
-                  }`}
-                >
-                  <Zap className={`w-8 h-8 mr-4 ${hardware === 'gpu' ? 'text-indigo-600' : 'text-slate-400'}`} />
-                  <div>
-                    <h3 className="font-bold text-slate-800">高性能服务器 / 工作站</h3>
-                    <p className="text-sm text-slate-500">NVIDIA RTX 3060+, Tesla T4</p>
-                  </div>
+             <h2 className="text-xl font-semibold text-slate-800">目标部署环境算力评估</h2>
+             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                <div onClick={() => setHardware('gpu_high')} className={`flex flex-col p-6 rounded-xl border-2 cursor-pointer transition-all ${hardware === 'gpu_high' ? 'border-indigo-600 bg-indigo-50' : 'border-slate-200 bg-white hover:border-slate-300'}`}>
+                  <Zap className={`w-8 h-8 mb-4 ${hardware === 'gpu_high' ? 'text-indigo-600' : 'text-slate-400'}`} />
+                  <h3 className="font-bold text-slate-800 mb-1">高算力设备 / 工作站</h3>
+                  <p className="text-xs text-slate-500 mb-3">极致性能，支持大 Batch 并发</p>
+                  <p className="text-xs font-mono bg-slate-100 text-slate-600 p-2 rounded mt-auto">例如: RTX 5090, RTX 5080, A100</p>
                 </div>
-                <div 
-                  onClick={() => setHardware('cpu')}
-                  className={`flex items-center p-6 rounded-xl border-2 cursor-pointer transition-all ${
-                    hardware === 'cpu' ? 'border-indigo-600 bg-indigo-50' : 'border-slate-200 bg-white hover:border-slate-300'
-                  }`}
-                >
-                  <Cpu className={`w-8 h-8 mr-4 ${hardware === 'cpu' ? 'text-indigo-600' : 'text-slate-400'}`} />
-                  <div>
-                    <h3 className="font-bold text-slate-800">边缘计算设备 / 工控机</h3>
-                    <p className="text-sm text-slate-500">Intel Core i5, Jetson Nano (CPU Mode)</p>
-                  </div>
+                <div onClick={() => setHardware('gpu_low')} className={`flex flex-col p-6 rounded-xl border-2 cursor-pointer transition-all ${hardware === 'gpu_low' ? 'border-indigo-600 bg-indigo-50' : 'border-slate-200 bg-white hover:border-slate-300'}`}>
+                  <Cpu className={`w-8 h-8 mb-4 ${hardware === 'gpu_low' ? 'text-indigo-600' : 'text-slate-400'}`} />
+                  <h3 className="font-bold text-slate-800 mb-1">入门级 GPU / 边缘节点</h3>
+                  <p className="text-xs text-slate-500 mb-3">性价比部署，均衡推理速度</p>
+                  <p className="text-xs font-mono bg-slate-100 text-slate-600 p-2 rounded mt-auto">例如: RTX 3060, RTX 4060, Tesla T4</p>
+                </div>
+                <div onClick={() => setHardware('cpu')} className={`flex flex-col p-6 rounded-xl border-2 cursor-pointer transition-all ${hardware === 'cpu' ? 'border-indigo-600 bg-indigo-50' : 'border-slate-200 bg-white hover:border-slate-300'}`}>
+                  <HardDrive className={`w-8 h-8 mb-4 ${hardware === 'cpu' ? 'text-indigo-600' : 'text-slate-400'}`} />
+                  <h3 className="font-bold text-slate-800 mb-1">纯 CPU 工业控制机</h3>
+                  <p className="text-xs text-slate-500 mb-3">无独立显卡，极低功耗</p>
+                  <p className="text-xs font-mono bg-slate-100 text-slate-600 p-2 rounded mt-auto">例如: Intel Core i5/i7, ARM</p>
                 </div>
              </div>
              {hardware === 'cpu' && (
               <div className="p-4 bg-amber-50 text-amber-800 text-sm rounded-lg border border-amber-100 flex items-center">
                 <HardDrive className="w-4 h-4 mr-2" />
-                系统已自动将 Batch Size 限制为 4 以防止内存溢出。
+                系统已自动将 Batch Size 限制为 4，并开启量化选项以防止内存溢出。
               </div>
             )}
           </div>
@@ -146,26 +213,38 @@ export const TrainingForge: React.FC<TrainingForgeProps> = ({ onNavigateToSample
 
       case 2: // Data
         return (
-          <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
-             <h2 className="text-xl font-semibold text-slate-800">挂载数据集</h2>
-             <div className="bg-white p-8 rounded-xl border border-slate-200 shadow-sm">
-                <label className="block text-sm font-medium text-slate-700 mb-2">选择数据集快照</label>
-                <div className="flex gap-3">
-                  <select className="flex-1 border border-slate-300 rounded-lg px-4 py-2.5 focus:ring-2 focus:ring-indigo-500 outline-none text-slate-700 bg-white">
-                    <option>2026-无线产线-划痕专项 (500张)</option>
-                    <option>2026-全量测试集 (1200张) - Verified</option>
-                  </select>
-                  <button 
-                    onClick={onNavigateToSampleHub}
-                    className="flex items-center px-4 py-2 text-indigo-600 bg-indigo-50 hover:bg-indigo-100 rounded-lg transition-colors font-medium text-sm"
-                  >
-                    管理/新增数据集 <ExternalLink className="w-4 h-4 ml-2" />
-                  </button>
-                </div>
-                <div className="mt-4 flex gap-4 text-sm text-slate-500">
-                   <div className="flex items-center"><Check className="w-4 h-4 text-emerald-500 mr-1"/> 数据格式校验通过</div>
-                   <div className="flex items-center"><Check className="w-4 h-4 text-emerald-500 mr-1"/> 标签一致性 100%</div>
-                </div>
+          <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500 flex flex-col h-full">
+             <div className="flex justify-between items-center">
+               <h2 className="text-xl font-semibold text-slate-800 flex items-center">
+                 挂载训练数据集 <span className="ml-3 text-sm font-normal text-slate-500 bg-slate-100 px-2 py-0.5 rounded-full">已选 {selectedDatasetIds.size} 项</span>
+               </h2>
+               <button onClick={onNavigateToSampleHub} className="text-sm text-indigo-600 hover:text-indigo-800 flex items-center font-medium bg-indigo-50 px-3 py-1.5 rounded-md transition-colors">
+                  管理/新增数据集 <ExternalLink className="w-4 h-4 ml-1.5" />
+               </button>
+             </div>
+             
+             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 max-h-[60vh] overflow-y-auto pr-2 pb-4">
+               {datasets.map(ds => (
+                 <div key={ds.id} onClick={() => toggleDataset(ds.id)} className={`relative bg-white rounded-xl border-2 p-5 cursor-pointer transition-all ${selectedDatasetIds.has(ds.id) ? 'border-indigo-600 bg-indigo-50/30' : 'border-slate-200 hover:border-indigo-300'}`}>
+                    <div className="absolute top-4 right-4 text-slate-400">
+                      {selectedDatasetIds.has(ds.id) ? <CheckSquare className="w-5 h-5 text-indigo-600"/> : <Square className="w-5 h-5"/>}
+                    </div>
+                    <div className="flex items-start gap-3 mb-3">
+                       <div className={`p-2 rounded-lg ${selectedDatasetIds.has(ds.id) ? 'bg-indigo-600 text-white' : 'bg-slate-100 text-slate-500'}`}><FolderArchive className="w-5 h-5" /></div>
+                       <div className="pr-6">
+                          <h3 className="font-bold text-slate-800 text-base line-clamp-1" title={ds.name}>{ds.name}</h3>
+                          <span className="text-[10px] bg-slate-100 text-slate-500 px-1.5 py-0.5 rounded border">{ds.version || 'v1.0'}</span>
+                       </div>
+                    </div>
+                    <div className="space-y-1.5 text-xs text-slate-600">
+                       <div className="flex justify-between border-b border-slate-100 pb-1.5"><span className="text-slate-400">样本数量</span> <span className="font-bold text-slate-800">{ds.count} 张</span></div>
+                       <div className="flex justify-between border-b border-slate-100 pb-1.5"><span className="text-slate-400">产线/工序</span> <span className="truncate w-32 text-right">{ds.lines?.join(',') || '-'} / {ds.processes?.join(',') || '-'}</span></div>
+                       <div className="flex justify-between border-b border-slate-100 pb-1.5"><span className="text-slate-400">设备来源</span> <span className="truncate w-32 text-right">{ds.devices?.join(',') || '-'}</span></div>
+                       <div className="flex justify-between pt-1"><span className="text-slate-400">缺陷标签</span> <span className="font-medium text-indigo-700 truncate w-32 text-right" title={ds.tags.join(',')}>{ds.tags.length > 0 ? ds.tags.join(', ') : '无'}</span></div>
+                    </div>
+                 </div>
+               ))}
+               {datasets.length === 0 && <div className="col-span-full py-10 text-center text-slate-400 bg-slate-50 border-2 border-dashed rounded-xl">暂无数据集，请先前往样本库固化数据集。</div>}
              </div>
           </div>
         );
@@ -174,78 +253,103 @@ export const TrainingForge: React.FC<TrainingForgeProps> = ({ onNavigateToSample
         return (
           <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
              <div className="flex justify-between items-center">
-               <h2 className="text-xl font-semibold text-slate-800">训练参数配置</h2>
+               <h2 className="text-xl font-semibold text-slate-800">严谨配置训练参数</h2>
                <div className="flex items-center gap-2">
-                 <span className={`text-sm font-medium ${engineerMode ? 'text-indigo-600' : 'text-slate-500'}`}>
-                   工程师模式
-                 </span>
-                 <button 
-                   onClick={() => setEngineerMode(!engineerMode)}
-                   className={`w-11 h-6 flex items-center rounded-full p-1 transition-colors duration-200 ${engineerMode ? 'bg-indigo-600' : 'bg-slate-300'}`}
-                 >
+                 <span className={`text-sm font-medium ${engineerMode ? 'text-indigo-600' : 'text-slate-500'}`}>工程师进阶模式</span>
+                 <button onClick={() => setEngineerMode(!engineerMode)} className={`w-11 h-6 flex items-center rounded-full p-1 transition-colors duration-200 ${engineerMode ? 'bg-indigo-600' : 'bg-slate-300'}`}>
                    <div className={`bg-white w-4 h-4 rounded-full shadow-md transform transition-transform duration-200 ${engineerMode ? 'translate-x-5' : 'translate-x-0'}`}></div>
                  </button>
                </div>
              </div>
 
-             <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm">
-               {!engineerMode ? (
-                 <div className="space-y-6">
-                   <div>
-                     <label className="block text-sm font-medium text-slate-700 mb-3">训练强度 (Intensity)</label>
-                     <input type="range" min="0" max="2" step="1" className="w-full accent-indigo-600 cursor-pointer" />
-                     <div className="flex justify-between text-xs text-slate-500 mt-2 font-medium">
-                       <span>快速 (Proto)</span>
-                       <span>标准 (Standard)</span>
-                       <span>深度 (Deep)</span>
-                     </div>
-                   </div>
-                   <div>
-                     <label className="block text-sm font-medium text-slate-700 mb-3">图片输入尺寸</label>
-                     <div className="flex gap-4">
-                        <label className="flex items-center gap-2 border p-3 rounded-lg cursor-pointer hover:bg-slate-50 flex-1">
-                          <input type="radio" name="size" className="text-indigo-600" />
-                          <span className="text-sm">320px (速度优先)</span>
-                        </label>
-                        <label className="flex items-center gap-2 border p-3 rounded-lg cursor-pointer hover:bg-slate-50 flex-1">
-                          <input type="radio" name="size" defaultChecked className="text-indigo-600" />
-                          <span className="text-sm">640px (精度优先)</span>
-                        </label>
-                     </div>
-                   </div>
+             <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm space-y-8">
+               {/* 基础配置 */}
+               <div>
+                 <div className="flex justify-between items-center mb-2">
+                   <label className="text-sm font-bold text-slate-800">训练迭代轮次 (Epochs)</label>
+                   <span className="text-indigo-600 font-bold bg-indigo-50 px-3 py-1 rounded-md">{epochs}</span>
                  </div>
-               ) : (
-                 <div>
-                   <div className="border-b border-slate-200 mb-4 flex gap-6">
-                      <button className="text-sm font-medium text-indigo-600 border-b-2 border-indigo-600 pb-2">数据增强</button>
-                      <button className="text-sm font-medium text-slate-500 hover:text-slate-800 pb-2">超参数</button>
+                 <p className="text-xs text-slate-500 mb-4">设定模型学习数据的遍历次数。数值越大模型学习越充分，但耗时越长且可能导致过拟合。</p>
+                 <input type="range" min="1" max="1000" step="1" value={epochs} onChange={(e) => setEpochs(Number(e.target.value))} className="w-full accent-indigo-600 cursor-pointer" />
+                 <div className="flex justify-between text-xs text-slate-400 mt-2 font-medium">
+                   <span>快速验证 (1 Epoch)</span>
+                   <span>标准推荐 (300 Epochs)</span>
+                   <span>深度拟合 (1000 Epochs)</span>
+                 </div>
+               </div>
+               
+               <div className="pt-4 border-t border-slate-100">
+                 <label className="block text-sm font-bold text-slate-800 mb-2">模型输入分辨率 (Image Size)</label>
+                 <p className="text-xs text-slate-500 mb-4">决定模型看到的图像精细度。高分辨率有利于微小缺陷检测，但增加显存消耗。</p>
+                 <div className="flex gap-4">
+                    <label className="flex items-center gap-2 border p-3 rounded-lg cursor-pointer hover:bg-slate-50 flex-1">
+                      <input type="radio" name="size" className="text-indigo-600" />
+                      <span className="text-sm font-medium">320px (速度优先)</span>
+                    </label>
+                    <label className="flex items-center gap-2 border p-3 rounded-lg cursor-pointer hover:bg-slate-50 flex-1 border-indigo-200 bg-indigo-50/30">
+                      <input type="radio" name="size" defaultChecked className="text-indigo-600" />
+                      <span className="text-sm font-medium">640px (性能均衡/推荐)</span>
+                    </label>
+                    <label className="flex items-center gap-2 border p-3 rounded-lg cursor-pointer hover:bg-slate-50 flex-1">
+                      <input type="radio" name="size" className="text-indigo-600" />
+                      <span className="text-sm font-medium">1280px (微小缺陷优先)</span>
+                    </label>
+                 </div>
+               </div>
+
+               {/* 进阶配置 */}
+               {engineerMode && (
+                 <div className="pt-6 border-t border-slate-200 animate-in fade-in slide-in-from-top-4 duration-300">
+                   <div className="border-b border-slate-200 mb-6 flex gap-6">
+                      <button onClick={() => setActiveConfigTab('aug')} className={`text-sm font-medium pb-2 transition-colors ${activeConfigTab === 'aug' ? 'text-indigo-600 border-b-2 border-indigo-600' : 'text-slate-500 hover:text-slate-800'}`}>基础增强配置</button>
+                      <button onClick={() => setActiveConfigTab('hyper')} className={`text-sm font-medium pb-2 transition-colors ${activeConfigTab === 'hyper' ? 'text-indigo-600 border-b-2 border-indigo-600' : 'text-slate-500 hover:text-slate-800'}`}>网络超参数 (YOLO规范)</button>
                    </div>
-                   <div className="grid grid-cols-2 gap-6">
-                      <div className="space-y-4">
-                        <div className="flex justify-between items-center">
-                          <span className="text-sm text-slate-700">随机旋转 (0-180°)</span>
-                          <input type="checkbox" defaultChecked className="rounded text-indigo-600" />
+                   
+                   {activeConfigTab === 'aug' ? (
+                     <div className="grid grid-cols-2 gap-x-10 gap-y-6">
+                        <div>
+                          <label className="flex justify-between text-sm font-medium text-slate-700 mb-2"><span>Mosaic 概率</span> <span className="font-mono text-indigo-600">{augParams.mosaic.toFixed(2)}</span></label>
+                          <input type="range" min="0" max="1" step="0.05" value={augParams.mosaic} onChange={e => setAugParams({...augParams, mosaic: parseFloat(e.target.value)})} className="w-full accent-indigo-600 cursor-pointer" />
                         </div>
-                        <div className="flex justify-between items-center">
-                          <span className="text-sm text-slate-700">Mosaic 概率</span>
-                          <span className="text-xs font-mono bg-slate-100 px-2 py-1 rounded">0.5</span>
+                        <div>
+                          <label className="flex justify-between text-sm font-medium text-slate-700 mb-2"><span>MixUp 概率</span> <span className="font-mono text-indigo-600">{augParams.mixup.toFixed(2)}</span></label>
+                          <input type="range" min="0" max="1" step="0.05" value={augParams.mixup} onChange={e => setAugParams({...augParams, mixup: parseFloat(e.target.value)})} className="w-full accent-indigo-600 cursor-pointer" />
                         </div>
-                        <input type="range" className="w-full accent-indigo-600 h-1 bg-slate-200 rounded" />
-                      </div>
-                      <div className="space-y-4">
-                         <div>
-                           <label className="text-xs text-slate-500 block mb-1">Learning Rate</label>
-                           <input type="text" defaultValue="0.001" className="w-full border border-slate-300 rounded px-2 py-1 text-sm font-mono" />
+                        <div>
+                          <label className="flex justify-between text-sm font-medium text-slate-700 mb-2"><span>随机旋转 (degrees)</span> <span className="font-mono text-indigo-600">{augParams.degrees.toFixed(1)}°</span></label>
+                          <input type="range" min="0" max="180" step="1" value={augParams.degrees} onChange={e => setAugParams({...augParams, degrees: parseFloat(e.target.value)})} className="w-full accent-indigo-600 cursor-pointer" />
+                        </div>
+                        <div>
+                          <label className="flex justify-between text-sm font-medium text-slate-700 mb-2"><span>透视变换 (perspective)</span> <span className="font-mono text-indigo-600">{augParams.perspective.toFixed(3)}</span></label>
+                          <input type="range" min="0" max="0.002" step="0.0001" value={augParams.perspective} onChange={e => setAugParams({...augParams, perspective: parseFloat(e.target.value)})} className="w-full accent-indigo-600 cursor-pointer" />
+                        </div>
+                     </div>
+                   ) : (
+                     <div className="grid grid-cols-3 gap-6">
+                       {[
+                         { label: '初始学习率 (lr0)', key: 'lr0', step: '0.001' },
+                         { label: '最终学习率 (lrf)', key: 'lrf', step: '0.01' },
+                         { label: '动量 (momentum)', key: 'momentum', step: '0.001' },
+                         { label: '权重衰减 (weight_decay)', key: 'weight_decay', step: '0.0001' },
+                         { label: '预热轮次 (warmup_epochs)', key: 'warmup_epochs', step: '0.1' },
+                         { label: '预热动量 (warmup_momentum)', key: 'warmup_momentum', step: '0.01' },
+                       ].map(p => (
+                         <div key={p.key}>
+                           <label className="text-xs font-bold text-slate-600 block mb-1.5">{p.label}</label>
+                           <input type="number" step={p.step} value={(hyperparams as any)[p.key]} onChange={e => setHyperparams({...hyperparams, [p.key]: parseFloat(e.target.value)})} className="w-full border border-slate-300 rounded-md px-3 py-2 text-sm font-mono focus:ring-2 focus:ring-indigo-500 outline-none" />
                          </div>
-                         <div>
-                           <label className="text-xs text-slate-500 block mb-1">Optimizer</label>
-                           <select className="w-full border border-slate-300 rounded px-2 py-1 text-sm">
-                             <option>AdamW</option>
-                             <option>SGD</option>
+                       ))}
+                       <div className="col-span-3 pt-4 border-t border-slate-100">
+                           <label className="text-xs font-bold text-slate-600 block mb-1.5">优化器 (Optimizer)</label>
+                           <select className="w-1/3 border border-slate-300 rounded-md px-3 py-2 text-sm font-mono focus:ring-2 focus:ring-indigo-500 outline-none">
+                             <option value="auto">Auto</option>
+                             <option value="SGD">SGD</option>
+                             <option value="Adam">Adam</option>
+                             <option value="AdamW">AdamW</option>
                            </select>
-                         </div>
-                      </div>
-                   </div>
+                       </div>
+                     </div>
+                   )}
                  </div>
                )}
              </div>
@@ -257,10 +361,7 @@ export const TrainingForge: React.FC<TrainingForgeProps> = ({ onNavigateToSample
           <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
              <div className="flex flex-col items-center justify-center py-10">
                {!isTraining ? (
-                 <button 
-                  onClick={() => setIsTraining(true)}
-                  className="group relative inline-flex items-center justify-center px-8 py-4 font-bold text-white transition-all duration-200 bg-indigo-600 rounded-full focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-600 hover:bg-indigo-700 hover:scale-105 shadow-lg shadow-indigo-200"
-                 >
+                 <button onClick={() => setIsTraining(true)} className="group relative inline-flex items-center justify-center px-8 py-4 font-bold text-white transition-all duration-200 bg-indigo-600 rounded-full focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-600 hover:bg-indigo-700 hover:scale-105 shadow-lg shadow-indigo-200">
                    <Play className="w-5 h-5 mr-2 fill-current" />
                    生成离线训练包
                  </button>
@@ -273,22 +374,16 @@ export const TrainingForge: React.FC<TrainingForgeProps> = ({ onNavigateToSample
                       </div>
                       <div className="p-4 h-64 overflow-y-auto space-y-2">
                         {logs.map((log) => (
-                          <div key={log.id} className="text-green-400 break-words animate-in fade-in slide-in-from-left-2 duration-300">
-                            {log.text}
-                          </div>
+                          <div key={log.id} className="text-green-400 break-words animate-in fade-in slide-in-from-left-2 duration-300">{log.text}</div>
                         ))}
                         <div ref={logsEndRef} />
-                        {!isFinished && (
-                          <div className="text-green-400 animate-pulse">_</div>
-                        )}
+                        {!isFinished && <div className="text-green-400 animate-pulse">_</div>}
                       </div>
                    </div>
-                   
                    {isFinished && (
                      <div className="mt-8 flex justify-center animate-in zoom-in duration-500">
                         <button className="flex items-center px-6 py-3 bg-white text-indigo-600 font-bold rounded-lg border-2 border-indigo-100 hover:border-indigo-600 hover:bg-indigo-50 transition-all shadow-md">
-                          <Download className="w-5 h-5 mr-2" />
-                          下载 .zip (145 MB)
+                          <Download className="w-5 h-5 mr-2" /> 下载 .zip
                         </button>
                      </div>
                    )}
@@ -297,15 +392,12 @@ export const TrainingForge: React.FC<TrainingForgeProps> = ({ onNavigateToSample
              </div>
           </div>
         );
-      
-      default:
-        return null;
+      default: return null;
     }
   };
 
   return (
     <div className="flex flex-col h-full">
-      {/* Stepper Header */}
       <div className="mb-8">
         <div className="flex items-center justify-between relative">
            <div className="absolute left-0 top-1/2 -translate-y-1/2 w-full h-1 bg-slate-200 -z-10"></div>
@@ -314,44 +406,26 @@ export const TrainingForge: React.FC<TrainingForgeProps> = ({ onNavigateToSample
              const isCompleted = index < currentStep;
              return (
                <div key={index} className="flex flex-col items-center bg-slate-50 px-2">
-                 <div 
-                   className={`w-10 h-10 rounded-full flex items-center justify-center border-2 transition-colors duration-300 ${
-                     isActive ? 'border-indigo-600 bg-indigo-600 text-white shadow-lg shadow-indigo-200' : 
-                     isCompleted ? 'border-emerald-500 bg-emerald-500 text-white' : 
-                     'border-slate-300 bg-white text-slate-400'
-                   }`}
-                 >
+                 <div className={`w-10 h-10 rounded-full flex items-center justify-center border-2 transition-colors duration-300 ${isActive ? 'border-indigo-600 bg-indigo-600 text-white shadow-lg shadow-indigo-200' : isCompleted ? 'border-emerald-500 bg-emerald-500 text-white' : 'border-slate-300 bg-white text-slate-400'}`}>
                    {isCompleted ? <Check className="w-5 h-5" /> : <step.icon className="w-5 h-5" />}
                  </div>
-                 <span className={`text-xs font-medium mt-2 ${isActive ? 'text-indigo-800' : 'text-slate-500'}`}>
-                   {step.title}
-                 </span>
+                 <span className={`text-xs font-medium mt-2 ${isActive ? 'text-indigo-800' : 'text-slate-500'}`}>{step.title}</span>
                </div>
              );
            })}
         </div>
       </div>
 
-      {/* Content Area */}
-      <div className="flex-1 overflow-y-auto px-1">
-        {renderStepContent()}
-      </div>
+      <div className="flex-1 overflow-y-auto px-1">{renderStepContent()}</div>
 
-      {/* Navigation Footer */}
       {!isTraining && (
         <div className="mt-6 pt-6 border-t border-slate-200 flex justify-between">
-          <button 
-            disabled={currentStep === 0}
-            onClick={() => setCurrentStep(curr => curr - 1)}
-            className="px-6 py-2 text-slate-600 font-medium hover:bg-slate-100 rounded-lg disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-          >
-            上一步
-          </button>
-          
+          <button disabled={currentStep === 0} onClick={() => setCurrentStep(curr => curr - 1)} className="px-6 py-2 text-slate-600 font-medium hover:bg-slate-100 rounded-lg disabled:opacity-50 disabled:cursor-not-allowed transition-colors">上一步</button>
           {currentStep < steps.length - 1 && (
             <button 
               onClick={() => setCurrentStep(curr => curr + 1)}
-              disabled={(currentStep === 0 && !scenario) || (currentStep === 1 && !hardware)}
+              // 第一步必须同时选中 scenario 和 baseModel 才能进行下一步
+              disabled={(currentStep === 0 && (!scenario || !baseModel)) || (currentStep === 1 && !hardware) || (currentStep === 2 && selectedDatasetIds.size === 0)}
               className="px-6 py-2 bg-indigo-600 text-white font-medium rounded-lg hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed shadow-sm transition-all flex items-center"
             >
               下一步 <ChevronRight className="w-4 h-4 ml-1" />

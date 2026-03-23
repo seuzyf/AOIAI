@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Upload, FileUp, Search, Database, Loader2, Save, Trash2, Tag, ArrowLeft, Plus, Filter, CheckSquare, Square, FolderArchive, Image as ImageIcon } from 'lucide-react';
+import { Upload, FileUp, Search, Database, Loader2, Save, Trash2, Tag, ArrowLeft, Plus, Filter, CheckSquare, Square, FolderArchive, Image as ImageIcon, X } from 'lucide-react';
 import { Sample, Annotation, GlobalClass } from '../types';
 import { DEVICE_BRANDS, PROCESS_TYPES, LINE_TYPES } from '../constants';
 import { api } from '../api';
@@ -17,18 +17,16 @@ export const SampleHub: React.FC = () => {
 
   const [uploadMode, setUploadMode] = useState<'none'|'batch'|'zip'>('none');
   const [datasetModalOpen, setDatasetModalOpen] = useState(false);
+  const [addClassModalOpen, setAddClassModalOpen] = useState(false);
 
   useEffect(() => { loadData(); loadClasses(); }, []);
 
   const loadData = async () => { try { setSamples(await api.getSamples()); } catch (e) { console.error(e); } };
   const loadClasses = async () => { try { setClasses(await api.getClasses()); } catch (e) { console.error(e); } };
 
-  const handleAddClass = async () => {
-    const name = prompt('请输入新缺陷类型名称 (如: 极性错误 Polarity)');
-    if (!name) return;
-    const code = name.split(' ').pop()?.toUpperCase() || `T_${Date.now()}`;
-    const color = `#${Math.floor(Math.random()*16777215).toString(16).padStart(6, '0')}`;
-    await api.addClass({ name, code, color });
+  const handleDeleteClass = async (id: string, name: string) => {
+    if (!confirm(`确定要删除缺陷类型 [${name}] 吗？`)) return;
+    await api.deleteClass(id);
     loadClasses();
   };
 
@@ -71,11 +69,16 @@ export const SampleHub: React.FC = () => {
           <span className="font-semibold shrink-0">当前全局缺陷定义:</span>
           <div className="flex gap-2">
             {classes.map(cls => (
-              <span key={cls.id} style={{ borderColor: cls.color, color: cls.color }} className="px-2 py-0.5 bg-white rounded border text-xs font-bold whitespace-nowrap">{cls.name}</span>
+              <div key={cls.id} style={{ borderColor: cls.color, color: cls.color }} className="px-2 py-0.5 bg-white rounded border text-xs font-bold whitespace-nowrap flex items-center gap-1.5 group transition-all">
+                 {cls.name} 
+                 <button onClick={() => handleDeleteClass(String(cls.id), cls.name)} className="opacity-0 w-0 group-hover:w-auto overflow-hidden group-hover:opacity-100 hover:bg-red-50 hover:text-red-500 rounded-full transition-all duration-200" title="删除该分类">
+                   <X className="w-3 h-3" />
+                 </button>
+              </div>
             ))}
           </div>
         </div>
-        <button onClick={handleAddClass} className="shrink-0 flex items-center px-3 py-1 bg-white border border-indigo-200 text-indigo-600 rounded text-xs font-bold hover:bg-indigo-600 hover:text-white transition-colors ml-4">
+        <button onClick={() => setAddClassModalOpen(true)} className="shrink-0 flex items-center px-3 py-1.5 bg-white border border-indigo-200 text-indigo-600 rounded-md text-xs font-bold hover:bg-indigo-600 hover:text-white transition-colors ml-4 shadow-sm">
           <Plus className="w-3 h-3 mr-1" /> 新增缺陷类型
         </button>
       </div>
@@ -215,9 +218,55 @@ export const SampleHub: React.FC = () => {
 
       {uploadMode !== 'none' && <UploadModal mode={uploadMode} onClose={() => setUploadMode('none')} onRefresh={loadData} />}
       {datasetModalOpen && <DatasetModal selectedIds={Array.from(selectedIds)} onClose={() => setDatasetModalOpen(false)} onSuccess={() => { setDatasetModalOpen(false); setSelectedIds(new Set()); alert('数据集制作成功！'); }} />}
+      {addClassModalOpen && <AddClassModal onClose={() => setAddClassModalOpen(false)} onSuccess={loadClasses} />}
     </div>
   );
 };
+
+const AddClassModal = ({ onClose, onSuccess }: { onClose: () => void, onSuccess: () => void }) => {
+  const [zhName, setZhName] = useState('');
+  const [enCode, setEnCode] = useState('');
+  const [loading, setLoading] = useState(false);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setLoading(true);
+    try {
+      // 生成随机颜色作为默认高亮色
+      const color = `#${Math.floor(Math.random()*16777215).toString(16).padStart(6, '0')}`;
+      const fullName = `${zhName} (${enCode})`;
+      await api.addClass({ name: fullName, code: enCode.toUpperCase(), color });
+      onSuccess();
+      onClose();
+    } catch(err) { alert('添加失败'); } finally { setLoading(false); }
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
+       <div className="bg-white rounded-xl shadow-xl w-full max-w-sm p-6 border-t-4 border-indigo-600 animate-in zoom-in-95 duration-200">
+         <div className="flex justify-between items-center mb-4">
+           <h3 className="text-lg font-bold text-slate-900">新增缺陷类型</h3>
+           <button onClick={onClose} className="text-slate-400 hover:text-slate-600"><X className="w-5 h-5" /></button>
+         </div>
+         <form onSubmit={handleSubmit} className="space-y-4">
+           <div>
+             <label className="block text-xs font-bold text-slate-700 mb-1">缺陷中文名</label>
+             <input required placeholder="例如: 极性错误" className="w-full border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 outline-none" value={zhName} onChange={e => setZhName(e.target.value)} />
+           </div>
+           <div>
+             <label className="block text-xs font-bold text-slate-700 mb-1">英文代号 (Code)</label>
+             <input required placeholder="例如: POLARITY" className="w-full border rounded-lg px-3 py-2 text-sm uppercase focus:ring-2 focus:ring-indigo-500 outline-none font-mono" value={enCode} onChange={e => setEnCode(e.target.value)} />
+             <p className="text-[10px] text-slate-500 mt-1">用于代码和模型训练时的标签映射，建议全大写。</p>
+           </div>
+           <div className="flex justify-end gap-3 mt-6">
+             <button type="button" onClick={onClose} className="px-4 py-2 text-slate-600 hover:bg-slate-100 rounded text-sm">取消</button>
+             <button type="submit" disabled={loading} className="px-4 py-2 bg-indigo-600 text-white hover:bg-indigo-700 rounded text-sm font-medium">{loading ? '保存中...' : '保存分类'}</button>
+           </div>
+         </form>
+       </div>
+    </div>
+  )
+}
 
 const UploadModal = ({ mode, onClose, onRefresh }: { mode: 'batch'|'zip', onClose: () => void, onRefresh: () => void }) => {
   const [loading, setLoading] = useState(false);
@@ -309,7 +358,6 @@ const DatasetModal = ({ selectedIds, onClose, onSuccess }: { selectedIds: string
   )
 }
 
-// 修正：采用内部分辨率和CSS等比缩放，防止图片拉伸或坐标错位
 const RealAnnotationEditor: React.FC<{ sample: Sample, globalClasses: GlobalClass[], onBack: () => void }> = ({ sample, globalClasses, onBack }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   
@@ -324,7 +372,6 @@ const RealAnnotationEditor: React.FC<{ sample: Sample, globalClasses: GlobalClas
     const img = new Image();
     img.src = sample.thumbnailUrl;
     img.onload = () => {
-      // 设置 Canvas 内部分辨率为真实图片分辨率
       if (canvasRef.current) {
          canvasRef.current.width = img.naturalWidth;
          canvasRef.current.height = img.naturalHeight;
@@ -380,7 +427,6 @@ const RealAnnotationEditor: React.FC<{ sample: Sample, globalClasses: GlobalClas
     const canvas = canvasRef.current;
     if (!canvas) return { x: 0, y: 0 };
     const rect = canvas.getBoundingClientRect();
-    // 换算当前 CSS 尺寸与 Canvas 实际内部分辨率的比例
     const scaleX = canvas.width / rect.width;
     const scaleY = canvas.height / rect.height;
     return { x: (e.clientX - rect.left) * scaleX, y: (e.clientY - rect.top) * scaleY };
@@ -400,7 +446,6 @@ const RealAnnotationEditor: React.FC<{ sample: Sample, globalClasses: GlobalClas
     const width = Math.abs(currentPos.x - startPos.x);
     const height = Math.abs(currentPos.y - startPos.y);
     
-    // 忽略过小的绘制防误触 (考虑到真实分辨率可能很大，阈值设为20px)
     if (width > 20 && height > 20) {
       const newAnnotation: Annotation = {
         id: `ann-${Date.now()}`,
@@ -446,7 +491,6 @@ const RealAnnotationEditor: React.FC<{ sample: Sample, globalClasses: GlobalClas
 
         <div className="flex-1 bg-slate-200 flex items-center justify-center p-6 overflow-hidden">
             <div className="relative shadow-xl bg-white cursor-crosshair border-2 border-slate-300 w-full h-full flex items-center justify-center bg-[url('data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAoAAAAKCAYAAACNMs+9AAAAAXNSR0IArs4c6QAAACVJREFUKFNjZCASMDKhuP///1/xM2ZmgIQZYRQYNSC1DAyUoQEA2m0H+Xg7rA0AAAAASUVORK5CYII=')]">
-               {/* 纯CSS等比例自适应缩放 */}
                <canvas 
                  ref={canvasRef}
                  onMouseDown={handleMouseDown}

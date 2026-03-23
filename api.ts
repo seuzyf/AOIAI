@@ -11,6 +11,8 @@ export const api = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(data)
     }).then(res => res.json()),
+  deleteClass: (id: string): Promise<{success: boolean}> => 
+    fetch(`${API_BASE}/classes/${id}`, { method: 'DELETE' }).then(res => res.json()),
 
   // 样本接口
   getSamples: (): Promise<Sample[]> => fetch(`${API_BASE}/samples`).then(res => res.json()),
@@ -43,7 +45,7 @@ export const api = {
       body: JSON.stringify({ annotations })
     }).then(res => res.json()),
 
-  // 模型接口 (保持原样)
+  // 模型接口 
   getModels: (): Promise<AIModel[]> => fetch(`${API_BASE}/models`).then(res => res.json()),
   uploadModel: (data: { name: string, target: string, desc: string, file: File | null }): Promise<AIModel> => {
     const formData = new FormData();
@@ -61,5 +63,11 @@ export const api = {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(data)
+    }).then(res => res.json()),
+  deleteDatasets: (ids: string[]): Promise<{success: boolean}> =>
+    fetch(`${API_BASE}/datasets/delete`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ids })
     }).then(res => res.json()),
 };

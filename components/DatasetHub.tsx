@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { FolderArchive, Calendar, Trash2, HardDrive, Target, Layers } from 'lucide-react';
+import { FolderArchive, Calendar, Trash2, HardDrive, Target, Layers, Download } from 'lucide-react';
 import { Dataset } from '../types';
 import { api } from '../api';
 
@@ -15,6 +15,10 @@ export const DatasetHub: React.FC = () => {
       loadData();
   }
 
+  const handleDownload = (id: string) => {
+      window.open(`/api/datasets/${id}/download`, '_blank');
+  }
+
   return (
     <div className="flex flex-col h-full animate-in fade-in duration-500">
       <div className="flex items-center justify-between mb-6">
@@ -27,9 +31,14 @@ export const DatasetHub: React.FC = () => {
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 overflow-y-auto pb-6">
         {datasets.map(ds => (
           <div key={ds.id} className="bg-white rounded-xl border border-slate-200 shadow-sm p-5 hover:shadow-md transition-shadow relative">
-             <button onClick={() => handleDelete(ds.id)} className="absolute top-4 right-4 p-1.5 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded">
-                <Trash2 className="w-4 h-4" />
-             </button>
+             <div className="absolute top-4 right-4 flex items-center gap-2">
+               <button onClick={() => handleDownload(ds.id)} className="p-1.5 text-indigo-500 hover:text-white hover:bg-indigo-500 rounded transition-colors" title="打包下载数据集">
+                  <Download className="w-4 h-4" />
+               </button>
+               <button onClick={() => handleDelete(ds.id)} className="p-1.5 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded transition-colors" title="删除数据集">
+                  <Trash2 className="w-4 h-4" />
+               </button>
+             </div>
              
              <div className="flex items-start gap-3 mb-4">
                 <div className="bg-indigo-50 p-3 rounded-lg text-indigo-600"><FolderArchive className="w-6 h-6" /></div>
