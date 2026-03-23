@@ -15,7 +15,7 @@ export const MOCK_SAMPLES: Sample[] = [
     thumbnailUrl: '/images/1 (1).jpg',
     line: LineType.WIRELESS,
     process: ProcessType.POST_REFLOW,
-    device: DeviceBrand.VCTA,
+    device: DeviceBrand.BENCHUANG,
     defects: [DefectType.SCRATCH],
     status: SampleStatus.LABELED,
     uploadDate: '2023-10-26',
@@ -79,7 +79,7 @@ export const MOCK_SAMPLES: Sample[] = [
 
 // [新增] Mock Datasets
 export const MOCK_DATASETS: Dataset[] = [
-  { id: 'ds-001', name: '2026-无线产线-划痕专项', count: 500, tags: ['无线', '划痕', '炉后'], creator: '周工程师', createDate: '2023-10-25', description: '包含最近一周VCTA设备采集的划痕样本' },
+  { id: 'ds-001', name: '2026-无线产线-划痕专项', count: 500, tags: ['无线', '划痕', '炉后'], creator: '周工程师', createDate: '2023-10-25', description: '包含最近一周BENCHUANG设备采集的划痕样本' },
   { id: 'ds-002', name: '2026-全量测试集-Verified', count: 1200, tags: ['全产线', '多缺陷'], creator: '王研究员', createDate: '2023-10-20' },
   { id: 'ds-003', name: 'Saki设备-误报数据清洗', count: 150, tags: ['光电', 'Saki'], creator: '系统自动', createDate: '2023-10-18' },
   { id: 'ds-004', name: '10月第一周-炉前AOI数据', count: 320, tags: ['炉前', '未标注'], creator: '李工', createDate: '2023-10-08' },

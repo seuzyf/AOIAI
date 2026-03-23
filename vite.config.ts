@@ -8,6 +8,21 @@ export default defineConfig(({ mode }) => {
       server: {
         port: 3000,
         host: '0.0.0.0',
+        proxy: {
+          // 使用正则精准匹配，仅代理 /api/ 开头的请求，避免误拦截 /api.ts 文件
+          '^/api/.*': {
+            target: 'http://localhost:3001',
+            changeOrigin: true
+          },
+          '/images': {
+            target: 'http://localhost:3001',
+            changeOrigin: true
+          },
+          '/models': {
+            target: 'http://localhost:3001',
+            changeOrigin: true
+          }
+        }
       },
       plugins: [react()],
       define: {
