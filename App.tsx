@@ -6,10 +6,12 @@ import {
   UserCircle2, 
   ScanEye,
   Menu,
-  ChevronRight
+  ChevronRight,
+  Share2 // [新增] Icon for ModelHub
 } from 'lucide-react';
 import { SampleHub } from './components/SampleHub';
 import { TrainingForge } from './components/TrainingForge';
+import { ModelHub } from './components/ModelHub'; // [新增] Import
 import { AppTab } from './types';
 
 function App() {
@@ -18,6 +20,7 @@ function App() {
   const menuItems = [
     { id: 'training', label: '模型选型库', icon: ScanEye },
     { id: 'samples', label: '样本资源库', icon: Database },
+    { id: 'models', label: '模型共享平台', icon: Share2 }, // [新增] Menu Item
     { id: 'settings', label: '系统设置', icon: Settings },
   ];
 
@@ -25,6 +28,7 @@ function App() {
     switch (activeTab) {
       case 'training': return '模型选型库';
       case 'samples': return '样本资源库';
+      case 'models': return '模型共享平台'; // [新增] Breadcrumb
       case 'settings': return '系统设置';
       default: return '首页';
     }
@@ -32,7 +36,7 @@ function App() {
 
   return (
     <div className="flex h-screen bg-slate-50 text-slate-900 font-sans">
-      {/* Sidebar */}
+      {/* Sidebar - No changes needed except menuItems definition above */}
       <aside className="w-64 bg-slate-900 text-slate-300 flex flex-col shadow-xl z-20">
         <div className="h-16 flex items-center px-6 border-b border-slate-800">
           <div className="w-8 h-8 bg-red-700 rounded-lg flex items-center justify-center mr-3 shadow-lg shadow-indigo-900/50">
@@ -69,7 +73,7 @@ function App() {
 
       {/* Main Content Area */}
       <div className="flex-1 flex flex-col min-w-0">
-        {/* Header */}
+        {/* Header - No changes needed */}
         <header className="h-16 bg-white border-b border-slate-200 flex items-center justify-between px-8 shadow-sm z-10">
           <div className="flex items-center text-sm text-slate-500">
              <span className="text-slate-400 hover:text-slate-600 cursor-pointer">首页</span>
@@ -90,13 +94,18 @@ function App() {
 
         {/* Page Content */}
         <main className="flex-1 overflow-auto p-8 relative">
-          <div className="max-w-6xl mx-auto h-full">
+          <div className="max-w-7xl mx-auto h-full">
             {activeTab === 'training' && (
               <TrainingForge onNavigateToSampleHub={() => setActiveTab('samples')} />
             )}
             
             {activeTab === 'samples' && (
               <SampleHub />
+            )}
+
+            {/* [新增] ModelHub Route */}
+            {activeTab === 'models' && (
+              <ModelHub />
             )}
 
             {activeTab === 'settings' && (
