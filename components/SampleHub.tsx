@@ -312,7 +312,19 @@ const UploadModal = ({ mode, onClose, onRefresh }: { mode: 'batch'|'zip', onClos
           </div>
           <div>
             <label className="block text-xs font-bold text-slate-500 mb-1">选择文件</label>
-            <input type="file" required multiple={mode === 'batch'} accept={mode === 'zip' ? '.zip' : 'image/*'} className="w-full border rounded-lg px-3 py-2 text-sm" onChange={e => setFiles(e.target.files)} />
+            <input 
+              type="file" 
+              required 
+              multiple={mode === 'batch'} 
+              accept={mode === 'zip' ? '.zip,.rar,.7z' : 'image/*'} 
+              className="w-full border rounded-lg px-3 py-2 text-sm" 
+              onChange={e => setFiles(e.target.files)} 
+            />
+            {mode === 'zip' && (
+              <p className="text-[10px] text-slate-400 mt-1">
+                支持上传 .zip, .rar, .7z 格式的压缩包
+              </p>
+            )}
           </div>
           <div className="flex justify-end gap-3 mt-6">
             <button type="button" onClick={onClose} className="px-4 py-2 text-slate-600 hover:bg-slate-100 rounded text-sm">取消</button>
