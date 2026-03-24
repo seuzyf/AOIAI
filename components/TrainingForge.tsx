@@ -20,7 +20,6 @@ import {
   Square,
   CheckCircle
 } from 'lucide-react';
-import { TERMINAL_LOGS } from '../constants';
 import { TerminalLog, Dataset } from '../types';
 import { api } from '../api';
 
@@ -61,6 +60,7 @@ export const TrainingForge: React.FC<TrainingForgeProps> = ({ onNavigateToSample
   
   // Params State
   const [epochs, setEpochs] = useState<number>(300);
+  const [imgsz, setImgsz] = useState<number>(640);
   const [activeConfigTab, setActiveConfigTab] = useState<'aug' | 'hyper'>('aug');
   
   // Augmentation State
@@ -89,12 +89,25 @@ export const TrainingForge: React.FC<TrainingForgeProps> = ({ onNavigateToSample
 
   useEffect(() => {
     if (isTraining && !isFinished) {
+      const dynamicLogs = [
+        `> [系统] 正在初始化工作空间...`,
+        `> [数据] 挂载选定的 ${selectedDatasetIds.size} 个数据集快照...`,
+        `> [场景] 设定为: ${scenario}, 加载基座权重: ${baseModel}...`,
+        `> [算力] 目标硬件预设: ${hardware}, 自动调整并发策略...`,
+        `> [配置] Epochs: ${epochs}, 图像分辨率: ${imgsz}px`,
+        `> [超参] lr0=${hyperparams.lr0}, lrf=${hyperparams.lrf}, momentum=${hyperparams.momentum}`,
+        `> [增强] mosaic=${augParams.mosaic}, mixup=${augParams.mixup}, 旋转=${augParams.degrees}°`,
+        `> [系统] 正在生成 train.py 训练脚本与 requirements.txt...`,
+        `> [系统] 打包资源文件... 压缩比 38%`,
+        `> [完成] 构建离线训练包成功 (Training_Package.zip)`
+      ];
       let delay = 0;
-      TERMINAL_LOGS.forEach((text, index) => {
-        delay += 800 + Math.random() * 500;
+      setLogs([]);
+      dynamicLogs.forEach((text, index) => {
+        delay += 600 + Math.random() * 400;
         setTimeout(() => {
-          setLogs(prev => [...prev, { id: Date.now(), text }]);
-          if (index === TERMINAL_LOGS.length - 1) setIsFinished(true);
+          setLogs(prev => [...prev, { id: Date.now() + index, text }]);
+          if (index === dynamicLogs.length - 1) setIsFinished(true);
         }, delay);
       });
     }
@@ -110,18 +123,15 @@ export const TrainingForge: React.FC<TrainingForgeProps> = ({ onNavigateToSample
 
   const handleScenarioChange = (id: 'detection' | 'classification' | 'segmentation') => {
     setScenario(id);
-    // 切换场景时，自动默认选中该场景下的第一个基座模型
     setBaseModel(BASE_MODELS[id][0].id);
   };
 
   const renderStepContent = () => {
     switch (currentStep) {
-      case 0: // Scenario & Base Model
+      case 0:
         return (
           <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
             <h2 className="text-xl font-semibold text-slate-800">选择应用场景与基座模型</h2>
-            
-            {/* 场景选择 */}
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
               {[
                 { id: 'detection', name: '缺陷定位 (Detection)', desc: '识别缺陷位置与类别，输出边界框', icon: Target },
@@ -148,7 +158,6 @@ export const TrainingForge: React.FC<TrainingForgeProps> = ({ onNavigateToSample
               ))}
             </div>
 
-            {/* 模型选择 (当选中场景后展示) */}
             {scenario && (
               <div className="mt-8 pt-6 border-t border-slate-200 animate-in fade-in slide-in-from-bottom-2 duration-300">
                  <h3 className="text-lg font-semibold text-slate-800 mb-4 flex items-center">
@@ -178,7 +187,7 @@ export const TrainingForge: React.FC<TrainingForgeProps> = ({ onNavigateToSample
           </div>
         );
 
-      case 1: // Hardware
+      case 1:
         return (
           <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
              <h2 className="text-xl font-semibold text-slate-800">目标部署环境算力评估</h2>
@@ -211,7 +220,7 @@ export const TrainingForge: React.FC<TrainingForgeProps> = ({ onNavigateToSample
           </div>
         );
 
-      case 2: // Data
+      case 2:
         return (
           <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500 flex flex-col h-full">
              <div className="flex justify-between items-center">
@@ -249,7 +258,7 @@ export const TrainingForge: React.FC<TrainingForgeProps> = ({ onNavigateToSample
           </div>
         );
 
-      case 3: // Config
+      case 3:
         return (
           <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
              <div className="flex justify-between items-center">
@@ -263,7 +272,6 @@ export const TrainingForge: React.FC<TrainingForgeProps> = ({ onNavigateToSample
              </div>
 
              <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm space-y-8">
-               {/* 基础配置 */}
                <div>
                  <div className="flex justify-between items-center mb-2">
                    <label className="text-sm font-bold text-slate-800">训练迭代轮次 (Epochs)</label>
@@ -273,7 +281,7 @@ export const TrainingForge: React.FC<TrainingForgeProps> = ({ onNavigateToSample
                  <input type="range" min="1" max="1000" step="1" value={epochs} onChange={(e) => setEpochs(Number(e.target.value))} className="w-full accent-indigo-600 cursor-pointer" />
                  <div className="flex justify-between text-xs text-slate-400 mt-2 font-medium">
                    <span>快速验证 (1 Epoch)</span>
-                   <span>标准推荐 (300 Epochs)</span>
+                   <span>标准推荐 (500 Epochs)</span>
                    <span>深度拟合 (1000 Epochs)</span>
                  </div>
                </div>
@@ -282,22 +290,21 @@ export const TrainingForge: React.FC<TrainingForgeProps> = ({ onNavigateToSample
                  <label className="block text-sm font-bold text-slate-800 mb-2">模型输入分辨率 (Image Size)</label>
                  <p className="text-xs text-slate-500 mb-4">决定模型看到的图像精细度。高分辨率有利于微小缺陷检测，但增加显存消耗。</p>
                  <div className="flex gap-4">
-                    <label className="flex items-center gap-2 border p-3 rounded-lg cursor-pointer hover:bg-slate-50 flex-1">
-                      <input type="radio" name="size" className="text-indigo-600" />
+                    <label className={`flex items-center gap-2 border p-3 rounded-lg cursor-pointer hover:bg-slate-50 flex-1 ${imgsz === 320 ? 'border-indigo-200 bg-indigo-50/30' : ''}`}>
+                      <input type="radio" name="size" checked={imgsz === 320} onChange={() => setImgsz(320)} className="text-indigo-600" />
                       <span className="text-sm font-medium">320px (速度优先)</span>
                     </label>
-                    <label className="flex items-center gap-2 border p-3 rounded-lg cursor-pointer hover:bg-slate-50 flex-1 border-indigo-200 bg-indigo-50/30">
-                      <input type="radio" name="size" defaultChecked className="text-indigo-600" />
+                    <label className={`flex items-center gap-2 border p-3 rounded-lg cursor-pointer hover:bg-slate-50 flex-1 ${imgsz === 640 ? 'border-indigo-200 bg-indigo-50/30' : ''}`}>
+                      <input type="radio" name="size" checked={imgsz === 640} onChange={() => setImgsz(640)} className="text-indigo-600" />
                       <span className="text-sm font-medium">640px (性能均衡/推荐)</span>
                     </label>
-                    <label className="flex items-center gap-2 border p-3 rounded-lg cursor-pointer hover:bg-slate-50 flex-1">
-                      <input type="radio" name="size" className="text-indigo-600" />
+                    <label className={`flex items-center gap-2 border p-3 rounded-lg cursor-pointer hover:bg-slate-50 flex-1 ${imgsz === 1280 ? 'border-indigo-200 bg-indigo-50/30' : ''}`}>
+                      <input type="radio" name="size" checked={imgsz === 1280} onChange={() => setImgsz(1280)} className="text-indigo-600" />
                       <span className="text-sm font-medium">1280px (微小缺陷优先)</span>
                     </label>
                  </div>
                </div>
 
-               {/* 进阶配置 */}
                {engineerMode && (
                  <div className="pt-6 border-t border-slate-200 animate-in fade-in slide-in-from-top-4 duration-300">
                    <div className="border-b border-slate-200 mb-6 flex gap-6">
@@ -356,7 +363,7 @@ export const TrainingForge: React.FC<TrainingForgeProps> = ({ onNavigateToSample
           </div>
         );
 
-      case 4: // Export
+      case 4:
         return (
           <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
              <div className="flex flex-col items-center justify-center py-10">
@@ -424,7 +431,6 @@ export const TrainingForge: React.FC<TrainingForgeProps> = ({ onNavigateToSample
           {currentStep < steps.length - 1 && (
             <button 
               onClick={() => setCurrentStep(curr => curr + 1)}
-              // 第一步必须同时选中 scenario 和 baseModel 才能进行下一步
               disabled={(currentStep === 0 && (!scenario || !baseModel)) || (currentStep === 1 && !hardware) || (currentStep === 2 && selectedDatasetIds.size === 0)}
               className="px-6 py-2 bg-indigo-600 text-white font-medium rounded-lg hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed shadow-sm transition-all flex items-center"
             >
