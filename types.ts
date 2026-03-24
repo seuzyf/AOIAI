@@ -43,7 +43,17 @@ export interface GlobalClass {
 
 export interface TerminalLog { id: number; text: string; }
 export interface ModelMetrics { precision: number; recall: number; map50: number; }
-export interface TrainingResultRow { epoch: number; trainBoxLoss: number; trainClsLoss: number; valPrecision: number; valRecall: number; valBgLoss: number; }
+
+export interface TrainingResultRow { 
+  epoch: number; 
+  trainBoxLoss: number; 
+  trainClsLoss: number; 
+  trainDflLoss?: number;
+  valPrecision: number; 
+  valRecall: number; 
+  valMap50?: number;
+  valBgLoss?: number; 
+}
 
 export interface AIModel {
   id: string;
@@ -58,4 +68,5 @@ export interface AIModel {
   csvData: TrainingResultRow[];
   chartUrl: string;
   filePath?: string;
+  args?: Record<string, any>;
 }
