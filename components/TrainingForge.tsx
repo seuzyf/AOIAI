@@ -103,7 +103,7 @@ export const TrainingForge: React.FC<TrainingForgeProps> = ({ onNavigateToSample
 
   const steps = [
     { title: '场景选型', icon: Target },
-    { title: '硬件环境', icon: Monitor },
+    { title: '训练硬件环境', icon: Monitor },
     { title: '数据挂载', icon: Database },
     { title: '参数配置', icon: Sliders },
     { title: '生成交付', icon: Play }
@@ -118,11 +118,11 @@ export const TrainingForge: React.FC<TrainingForgeProps> = ({ onNavigateToSample
         `> [配置] 场景设定为: ${scenario}, 加载基座权重: ${baseModel}...`,
         `> [算力] 目标硬件预设: ${hardware}, 自动调整并发策略...`,
         `> [超参] Epochs: ${epochs}, 图像分辨率: ${imgsz}px`,
-        `> [系统] 正在从 /model/${scenario}/ 提取 ${baseModel}.exe 离线训练引擎...`,
-        `> [数据] 拉取选中数据集的全部真实样本图片与标注...`,
-        `> [数据] 按设定比例随机打乱与切分 (Train ${trainRatio}%, Val ${valRatio}%, Test ${testRatio}%)...`,
-        `> [数据] 生成数据集目录树与 dataset.yaml 清单...`,
-        `> [完成] 离线一键训练包构建成功，等待下载`
+        `> [系统] 正在提取离线训练引擎依赖环境...`,
+        `> [数据] 校验与拉取选中数据集的全部真实样本图片与标注...`,
+        `> [数据] 动态调整相对坐标比例，转化为YOLO全量化标准格式...`,
+        `> [数据] 物理分配与隔离验证集、测试集...`,
+        `> [完成] 离线一键训练包构建成功，正在准备下载流`
       ];
       let delay = 0;
       setLogs([]);
@@ -155,11 +155,73 @@ export const TrainingForge: React.FC<TrainingForgeProps> = ({ onNavigateToSample
     setIsPackaging(true);
     try {
       const zip = new JSZip();
+
+      // === 第 1 步：优先处理数据聚合与验证逻辑 ===
+      const allSamples = await api.getSamples();
+      const selectedSampleIds = new Set<string>();
+      datasets.filter(d => selectedDatasetIds.has(d.id)).forEach(d => {
+        if (d.sampleIds) d.sampleIds.forEach(id => selectedSampleIds.add(id));
+      });
+
+      const validSamples = allSamples.filter(s => selectedSampleIds.has(s.id));
+      const totalSamples = validSamples.length;
+
+      if (totalSamples === 0) {
+        alert("无有效样本，请检查数据集是否包含数据！");
+        setIsPackaging(false);
+        return;
+      }
+
+      // 样本随机打乱 (Fisher-Yates)
+      for (let i = validSamples.length - 1; i > 0; i--) {
+          const j = Math.floor(Math.random() * (i + 1));
+          [validSamples[i], validSamples[j]] = [validSamples[j], validSamples[i]];
+      }
+
+      // 计算并确保训练和验证集都不会为空 (否则 YOLO 会报 Error loading data from val)
+      let trainCount = Math.floor(totalSamples * (trainRatio / 100));
+      let valCount = Math.floor(totalSamples * (valRatio / 100));
+      
+      if (valCount === 0 && totalSamples > 1) {
+          valCount = 1;
+          trainCount = totalSamples - 1;
+      } else if (trainCount === 0 && totalSamples > 1) {
+          trainCount = 1;
+          valCount = totalSamples - 1;
+      }
+      const testCount = Math.max(0, totalSamples - trainCount - valCount);
+
+      const splits = validSamples.map((sample, index) => {
+          if (index < trainCount) return { sample, folder: 'train' };
+          if (index < trainCount + valCount) return { sample, folder: 'val' };
+          return { sample, folder: 'test' };
+      });
+
+      // === 第 2 步：收集标签并生成 dataset.yaml ===
+      const selectedTags = new Set<string>();
+      datasets.filter(d => selectedDatasetIds.has(d.id)).forEach(d => {
+        d.tags.forEach(tag => selectedTags.add(tag));
+      });
+      const tagsArray = Array.from(selectedTags);
+      
+      // 使用更兼容的 YOLO Yaml 数组写法
+      const classesConfig = tagsArray.map(tag => `  - "${tag}"`).join('\n');
+
+      const datasetYamlContent = `train: images/train
+val: images/val
+${testCount > 0 ? 'test: images/test' : ''}
+
+# 类别定义
+names:
+${classesConfig || '  - "default_defect"'}
+`;
+      zip.file("dataset.yaml", datasetYamlContent);
+
+      // === 第 3 步：生成基础 args.yaml ===
       const taskType = scenario === 'detection' ? 'detect' : scenario === 'classification' ? 'classify' : 'segment';
       const batchSize = hardware === 'cpu' ? 4 : (hardware === 'gpu_high' ? 32 : 16);
       const deviceOpt = hardware === 'cpu' ? 'cpu' : '0';
 
-      // 1. 生成基础 args.yaml
       const yamlContent = `# ==========================================
 # 华为AI检测训练平台 - 离线训练预设参数
 # ==========================================
@@ -187,101 +249,85 @@ perspective: ${augParams.perspective}
 `;
       zip.file("args.yaml", yamlContent);
 
-      // 2. 收集标签并生成 dataset.yaml
-      const selectedTags = new Set<string>();
-      datasets.filter(d => selectedDatasetIds.has(d.id)).forEach(d => {
-        d.tags.forEach(tag => selectedTags.add(tag));
-      });
-      const tagsArray = Array.from(selectedTags);
-      const classesConfig = tagsArray.map((tag, idx) => `  ${idx}: ${tag}`).join('\n');
-
-      const datasetYamlContent = `path: ./datasets
-train: images/train
-val: images/val
-${testRatio > 0 ? 'test: images/test' : ''}
-
-# 类别定义 (包含所选数据集的 ${tagsArray.length} 种标签)
-names:
-${classesConfig || '  0: default_defect'}
-`;
-      zip.file("dataset.yaml", datasetYamlContent);
-
-      // 3. 构建空目录结构
+      // === 第 4 步：构建空目录结构 ===
       ['train', 'val', 'test'].forEach(dir => {
-          if (dir === 'test' && testRatio === 0) return;
+          if (dir === 'test' && testCount === 0) return;
           zip.folder("datasets")?.folder("images")?.folder(dir);
           zip.folder("datasets")?.folder("labels")?.folder(dir);
       });
       zip.folder("runs");
 
-      // 4. 拉取系统全量样本，筛选选中集合，并物理切分装包
-      try {
-          const allSamples = await api.getSamples();
-          const selectedSampleIds = new Set<string>();
-          datasets.filter(d => selectedDatasetIds.has(d.id)).forEach(d => {
-            if (d.sampleIds) d.sampleIds.forEach(id => selectedSampleIds.add(id));
-          });
+      // === 第 5 步：并发拉取真实图片并转化为YOLO文本写入 ===
+      let successImageCount = 0;
+      for (const { sample, folder } of splits) {
+          try {
+              if (!sample.thumbnailUrl) continue;
+              
+              // 修复跨域和路径缺失问题，强制指向后端的实际图片服务地址
+              const imgUrl = sample.thumbnailUrl.startsWith('http') 
+                  ? sample.thumbnailUrl 
+                  : `http://localhost:3001${sample.thumbnailUrl}`;
+              
+              const imgRes = await fetch(imgUrl);
+              if (!imgRes.ok) continue;
+              
+              const imgBlob = await imgRes.blob();
+              
+              // 动态解析图片实际宽高
+              const img = new Image();
+              const imgUrlObj = URL.createObjectURL(imgBlob);
+              const imgDimensions = await new Promise<{width: number, height: number}>((resolve) => {
+                  img.onload = () => resolve({ width: img.width, height: img.height });
+                  img.onerror = () => resolve({ width: 800, height: 600 });
+                  img.src = imgUrlObj;
+              });
+              URL.revokeObjectURL(imgUrlObj);
 
-          // 筛选出有效样本
-          const validSamples = allSamples.filter(s => selectedSampleIds.has(s.id));
+              // 过滤掉可能打断文件路径的非法字符
+              const extMatch = sample.filename.match(/\.([^.]+)$/);
+              const ext = extMatch ? extMatch[1] : 'jpg';
+              const baseName = sample.filename.replace(/\.[^.]+$/, '');
+              const sanitizedBaseName = baseName.replace(/[^a-zA-Z0-9_\-]/g, '_');
+              const finalName = `${sanitizedBaseName}_${sample.id.slice(-6)}`;
+              
+              // 写入图片
+              zip.file(`datasets/images/${folder}/${finalName}.${ext}`, imgBlob);
+              successImageCount++;
+              
+              // 拼装符合 YOLO 格式的 TXT 标注文件 (Class CenterX CenterY W H) - 全归一化
+              let labelContent = '';
+              if (sample.annotations && sample.annotations.length > 0) {
+                  const lines = sample.annotations.map(ann => {
+                      const classIdx = tagsArray.indexOf(ann.label);
+                      if (classIdx === -1) return null;
+                      
+                      const centerX = (ann.bbox.x + ann.bbox.width / 2) / imgDimensions.width;
+                      const centerY = (ann.bbox.y + ann.bbox.height / 2) / imgDimensions.height;
+                      const normW = ann.bbox.width / imgDimensions.width;
+                      const normH = ann.bbox.height / imgDimensions.height;
+                      
+                      const cx = Math.max(0, Math.min(1, centerX));
+                      const cy = Math.max(0, Math.min(1, centerY));
+                      const nw = Math.max(0, Math.min(1, normW));
+                      const nh = Math.max(0, Math.min(1, normH));
 
-          // Fisher-Yates shuffle 打乱数组，实现随机分配
-          for (let i = validSamples.length - 1; i > 0; i--) {
-              const j = Math.floor(Math.random() * (i + 1));
-              [validSamples[i], validSamples[j]] = [validSamples[j], validSamples[i]];
-          }
-
-          // 根据滑块设定的比例划分各阶段样本量
-          const totalSamples = validSamples.length;
-          const trainCount = Math.floor(totalSamples * (trainRatio / 100));
-          const valCount = Math.floor(totalSamples * (valRatio / 100));
-
-          const splits = validSamples.map((sample, index) => {
-              if (index < trainCount) return { sample, folder: 'train' };
-              if (index < trainCount + valCount) return { sample, folder: 'val' };
-              return { sample, folder: 'test' };
-          });
-
-          // 并发/顺序拉取真实图片并写入 Zip
-          for (const { sample, folder } of splits) {
-              try {
-                  if (!sample.thumbnailUrl) continue;
-                  
-                  // 获取真实图片流
-                  const imgRes = await fetch(sample.thumbnailUrl);
-                  if (!imgRes.ok) continue;
-                  const imgBlob = await imgRes.blob();
-                  
-                  // 获取扩展名并构建防冲突的文件名
-                  const extMatch = sample.filename.match(/\.([^.]+)$/);
-                  const ext = extMatch ? extMatch[1] : 'jpg';
-                  const baseName = sample.filename.replace(/\.[^.]+$/, '');
-                  const finalName = `${baseName}_${sample.id.slice(-6)}`;
-                  
-                  // 写入图片文件
-                  zip.file(`datasets/images/${folder}/${finalName}.${ext}`, imgBlob);
-                  
-                  // 拼装符合 YOLO 格式的 TXT 标注文件 (Class CenterX CenterY W H)
-                  let labelContent = '';
-                  if (sample.annotations && sample.annotations.length > 0) {
-                      const lines = sample.annotations.map(ann => {
-                          const classIdx = tagsArray.indexOf(ann.label);
-                          if (classIdx === -1) return null;
-                          return `${classIdx} ${ann.bbox.x.toFixed(6)} ${ann.bbox.y.toFixed(6)} ${ann.bbox.width.toFixed(6)} ${ann.bbox.height.toFixed(6)}`;
-                      }).filter(Boolean);
-                      labelContent = lines.join('\n');
-                  }
-                  
-                  zip.file(`datasets/labels/${folder}/${finalName}.txt`, labelContent + '\n');
-              } catch (err) {
-                  console.error(`处理样本图片失败: ${sample.id}`, err);
+                      return `${classIdx} ${cx.toFixed(6)} ${cy.toFixed(6)} ${nw.toFixed(6)} ${nh.toFixed(6)}`;
+                  }).filter(Boolean);
+                  labelContent = lines.join('\n');
               }
+              
+              // 写入 TXT 标签文件 (空文本也会生成，代表纯背景无缺陷的负样本)
+              zip.file(`datasets/labels/${folder}/${finalName}.txt`, labelContent + (labelContent ? '\n' : ''));
+          } catch (err) {
+              console.error(`处理样本图片失败: ${sample.id}`, err);
           }
-      } catch (err) {
-          console.error("拉取真实样本过程出错: ", err);
       }
 
-      // 5. 生成使用说明书
+      if (successImageCount === 0) {
+          alert("警告：后端接口拉取图片失败，导致 ZIP 包里没有存放任何图像。请确保 Node.js 服务 (3001) 已启动！");
+      }
+
+      // === 第 6 步：生成说明和外部依赖拉取 ===
       const readmeContent = `=== AOI 离线自动化训练包 ===
 
 环境要求: 无需安装任何 Python、CUDA 或框架环境。支持纯内网物理机运行。
@@ -296,32 +342,21 @@ ${classesConfig || '  0: default_defect'}
 `;
       zip.file("使用说明(必读).txt", readmeContent);
 
-      // 6. 拉取特定的 EXE 和 PT 文件 (来源于静态 public 文件夹)
       const modelBasePath = `/model/${scenario}`;
 
       try {
         const ptRes = await fetch(`${modelBasePath}/${baseModel}.pt`);
-        if (ptRes.ok) {
-          zip.file(`${baseModel}.pt`, await ptRes.blob());
-        } else {
-          zip.file(`${baseModel}.pt`, "占位文件：服务器未找到对应的 .pt 权重，请确保开发环境目录配置正确。");
-        }
-      } catch (e) {
-        zip.file(`${baseModel}.pt`, "占位文件：拉取 .pt 权重失败。");
-      }
+        if (ptRes.ok) zip.file(`${baseModel}.pt`, await ptRes.blob());
+        else zip.file(`${baseModel}.pt`, "占位文件：服务器未找到对应的 .pt 权重。");
+      } catch (e) {}
 
       try {
         const exeRes = await fetch(`${modelBasePath}/${baseModel}.exe`);
-        if (exeRes.ok) {
-          zip.file(`${baseModel}.exe`, await exeRes.blob());
-        } else {
-          zip.file(`${baseModel}_Placeholder.txt`, `开发环境提示：请将编译好的 ${baseModel}.exe 放置于 public/model/${scenario}/ 目录下。`);
-        }
-      } catch (e) {
-        zip.file(`${baseModel}_Placeholder.txt`, `开发环境提示：无法加载 ${baseModel}.exe`);
-      }
+        if (exeRes.ok) zip.file(`${baseModel}.exe`, await exeRes.blob());
+        else zip.file(`${baseModel}_Placeholder.txt`, `开发环境提示：无法加载 ${baseModel}.exe`);
+      } catch (e) {}
 
-      // 7. 统一打包并触发下载
+      // === 最终触发下载 ===
       const blob = await zip.generateAsync({ type: "blob", compression: "STORE" });
       const dateStr = new Date().toISOString().split('T')[0];
       const url = URL.createObjectURL(blob);
@@ -335,7 +370,7 @@ ${classesConfig || '  0: default_defect'}
       URL.revokeObjectURL(url);
     } catch (error) {
       console.error("生成压缩包失败:", error);
-      alert("生成压缩包失败，请检查浏览器支持或联系管理员。");
+      alert("生成压缩包失败，请检查浏览器网络。");
     } finally {
       setIsPackaging(false);
     }
@@ -405,7 +440,7 @@ ${classesConfig || '  0: default_defect'}
       case 1:
         return (
           <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
-             <h2 className="text-xl font-semibold text-slate-800">目标部署环境算力评估</h2>
+             <h2 className="text-xl font-semibold text-slate-800">训练硬件环境算力评估</h2>
              <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                 <div onClick={() => setHardware('gpu_high')} className={`flex flex-col p-6 rounded-xl border-2 cursor-pointer transition-all ${hardware === 'gpu_high' ? 'border-indigo-600 bg-indigo-50' : 'border-slate-200 bg-white hover:border-slate-300'}`}>
                   <Zap className={`w-8 h-8 mb-4 ${hardware === 'gpu_high' ? 'text-indigo-600' : 'text-slate-400'}`} />
@@ -488,7 +523,6 @@ ${classesConfig || '  0: default_defect'}
 
              <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm space-y-8">
                
-               {/* --- 新增：数据集切分比例配置区域 --- */}
                <div className="pb-2">
                  <label className="block text-sm font-bold text-slate-800 mb-2">数据集自动切分比例 (Dataset Split)</label>
                  <p className="text-xs text-slate-500 mb-4">设定训练集、验证集与测试集的比例，系统打包时会抽取真实图片并自动打乱分配至各个目录。</p>
