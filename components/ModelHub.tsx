@@ -1,9 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { Search, Download, FileText, Box, User, Calendar, CheckCircle, AlertTriangle, XCircle, Loader2, FolderUp, X, LineChart, Edit, RefreshCcw, Trash2 } from 'lucide-react';
-import { AIModel } from '../types';
+import { AIModel, UserInfo } from '../types';
 import { api } from '../api';
 
-export const ModelHub: React.FC = () => {
+export const ModelHub: React.FC<{ currentUser: UserInfo }> = ({ currentUser }) => {
   const [models, setModels] = useState<AIModel[]>([]);
   const [selectedModel, setSelectedModel] = useState<AIModel | null>(null);
   const [showUploadModal, setShowUploadModal] = useState(false);
@@ -65,6 +65,14 @@ export const ModelHub: React.FC = () => {
       setShowDeleteConfirm(false);
       setSelectedModel(null);
     } catch (error) { alert("删除失败"); }
+  };
+
+  // 权限判断：管理员可删除所有模型，工程师仅可删除自己上传的模型
+  const canDeleteModel = (model: AIModel | null) => {
+    if (!model) return false;
+    if (currentUser.role === 'admin') return true;
+    if (currentUser.role === 'engineer' && model.uploader === `${currentUser.name} ${currentUser.id}`) return true;
+    return false;
   };
 
   const getMetricColor = (value: number) => {
@@ -135,7 +143,9 @@ export const ModelHub: React.FC = () => {
             <div className="absolute right-14 top-4 flex items-center gap-1 border-r border-slate-200 pr-3">
               <button onClick={() => setShowEditModal(true)} title="修改信息" className="p-2 hover:bg-slate-100 rounded-full text-slate-500 transition-colors"><Edit className="w-5 h-5" /></button>
               <button onClick={() => setShowUpdateFileModal(true)} title="更新模型版本" className="p-2 hover:bg-indigo-50 rounded-full text-indigo-500 transition-colors"><RefreshCcw className="w-5 h-5" /></button>
-              <button onClick={() => setShowDeleteConfirm(true)} title="删除模型" className="p-2 hover:bg-red-50 rounded-full text-red-500 transition-colors"><Trash2 className="w-5 h-5" /></button>
+              {canDeleteModel(selectedModel) && (
+                <button onClick={() => setShowDeleteConfirm(true)} title="删除模型" className="p-2 hover:bg-red-50 rounded-full text-red-500 transition-colors"><Trash2 className="w-5 h-5" /></button>
+              )}
             </div>
             <button onClick={() => setSelectedModel(null)} className="absolute right-4 top-4 p-2 hover:bg-slate-100 rounded-full text-slate-400"><X className="w-6 h-6" /></button>
             
@@ -295,13 +305,14 @@ export const ModelHub: React.FC = () => {
         </div>
       )}
 
-      {/* 上传新模型弹窗 */}
-      {showUploadModal && <UploadModal onClose={() => setShowUploadModal(false)} onRefresh={loadModels} />}
+      {/* 上传新模型弹窗，将 currentUser 传递进去 */}
+      {showUploadModal && <UploadModal currentUser={currentUser} onClose={() => setShowUploadModal(false)} onRefresh={loadModels} />}
     </div>
   );
 };
 
-const UploadModal = ({ onClose, onRefresh }: { onClose: () => void, onRefresh: () => void }) => {
+// 上传组件：获取 currentUser 并赋值 uploader
+const UploadModal = ({ onClose, onRefresh, currentUser }: { onClose: () => void, onRefresh: () => void, currentUser: UserInfo }) => {
   const [loading, setLoading] = useState(false);
   const [formData, setFormData] = useState({ name: '', target: '', desc: '' });
   const [file, setFile] = useState<File | null>(null);
@@ -311,7 +322,12 @@ const UploadModal = ({ onClose, onRefresh }: { onClose: () => void, onRefresh: (
     if (!file) return alert('请选择模型文件');
     setLoading(true);
     try {
-      await api.uploadModel({ ...formData, file });
+      // 在提交时组合当前用户的名字和工号传入
+      await api.uploadModel({ 
+        ...formData, 
+        uploader: `${currentUser.name} ${currentUser.id}`, 
+        file 
+      });
       onRefresh();
       onClose();
     } catch (e) { alert('上传失败'); } finally { setLoading(false); }
