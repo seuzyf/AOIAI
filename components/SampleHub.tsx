@@ -1,10 +1,10 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Upload, FileUp, Search, Database, Loader2, Save, Trash2, Tag, ArrowLeft, Plus, Filter, CheckSquare, Square, FolderArchive, Image as ImageIcon, X } from 'lucide-react';
-import { Sample, Annotation, GlobalClass } from '../types';
+import { Sample, Annotation, GlobalClass, UserInfo } from '../types';
 import { DEVICE_BRANDS, PROCESS_TYPES, LINE_TYPES } from '../constants';
 import { api } from '../api';
 
-export const SampleHub: React.FC = () => {
+export const SampleHub: React.FC<{ currentUser: UserInfo }> = ({ currentUser }) => {
   const [samples, setSamples] = useState<Sample[]>([]);
   const [classes, setClasses] = useState<GlobalClass[]>([]);
   const [viewMode, setViewMode] = useState<'list' | 'editor'>('list');
@@ -71,9 +71,12 @@ export const SampleHub: React.FC = () => {
             {classes.map(cls => (
               <div key={cls.id} style={{ borderColor: cls.color, color: cls.color }} className="px-2 py-0.5 bg-white rounded border text-xs font-bold whitespace-nowrap flex items-center gap-1.5 group transition-all">
                  {cls.name} 
-                 <button onClick={() => handleDeleteClass(String(cls.id), cls.name)} className="opacity-0 w-0 group-hover:w-auto overflow-hidden group-hover:opacity-100 hover:bg-red-50 hover:text-red-500 rounded-full transition-all duration-200" title="删除该分类">
-                   <X className="w-3 h-3" />
-                 </button>
+                 {/* 权限判断：仅管理员可删除全局缺陷类型 */}
+                 {currentUser.role === 'admin' && (
+                   <button onClick={() => handleDeleteClass(String(cls.id), cls.name)} className="opacity-0 w-0 group-hover:w-auto overflow-hidden group-hover:opacity-100 hover:bg-red-50 hover:text-red-500 rounded-full transition-all duration-200" title="删除该分类">
+                     <X className="w-3 h-3" />
+                   </button>
+                 )}
               </div>
             ))}
           </div>
@@ -206,7 +209,10 @@ export const SampleHub: React.FC = () => {
                   <td className="px-6 py-3">
                     <div className="flex items-center gap-2">
                       <button onClick={() => { setSelectedSample(sample); setViewMode('editor'); }} className="text-indigo-600 hover:text-indigo-800 font-medium px-3 py-1 bg-indigo-50 rounded text-xs">标注</button>
-                      <button onClick={() => handleDelete(sample.id)} className="text-red-500 hover:text-red-700 hover:bg-red-50 p-1.5 rounded"><Trash2 className="w-4 h-4" /></button>
+                      {/* 权限判断：技师不能删除样本数据 */}
+                      {currentUser.role !== 'technician' && (
+                        <button onClick={() => handleDelete(sample.id)} className="text-red-500 hover:text-red-700 hover:bg-red-50 p-1.5 rounded"><Trash2 className="w-4 h-4" /></button>
+                      )}
                     </div>
                   </td>
                 </tr>
@@ -217,7 +223,7 @@ export const SampleHub: React.FC = () => {
       </div>
 
       {uploadMode !== 'none' && <UploadModal mode={uploadMode} onClose={() => setUploadMode('none')} onRefresh={loadData} />}
-      {datasetModalOpen && <DatasetModal selectedIds={Array.from(selectedIds)} onClose={() => setDatasetModalOpen(false)} onSuccess={() => { setDatasetModalOpen(false); setSelectedIds(new Set()); alert('数据集制作成功！'); }} />}
+      {datasetModalOpen && <DatasetModal currentUser={currentUser} selectedIds={Array.from(selectedIds)} onClose={() => setDatasetModalOpen(false)} onSuccess={() => { setDatasetModalOpen(false); setSelectedIds(new Set()); alert('数据集制作成功！'); }} />}
       {addClassModalOpen && <AddClassModal onClose={() => setAddClassModalOpen(false)} onSuccess={loadClasses} />}
     </div>
   );
@@ -232,7 +238,6 @@ const AddClassModal = ({ onClose, onSuccess }: { onClose: () => void, onSuccess:
     e.preventDefault();
     setLoading(true);
     try {
-      // 生成随机颜色作为默认高亮色
       const color = `#${Math.floor(Math.random()*16777215).toString(16).padStart(6, '0')}`;
       const fullName = `${zhName} (${enCode})`;
       await api.addClass({ name: fullName, code: enCode.toUpperCase(), color });
@@ -338,7 +343,7 @@ const UploadModal = ({ mode, onClose, onRefresh }: { mode: 'batch'|'zip', onClos
   );
 };
 
-const DatasetModal = ({ selectedIds, onClose, onSuccess }: { selectedIds: string[], onClose: () => void, onSuccess: () => void }) => {
+const DatasetModal = ({ selectedIds, onClose, onSuccess, currentUser }: { selectedIds: string[], onClose: () => void, onSuccess: () => void, currentUser: UserInfo }) => {
   const [formData, setFormData] = useState({ name: '', version: 'v1.0.0', date: new Date().toISOString().split('T')[0] });
   const [loading, setLoading] = useState(false);
 
@@ -346,7 +351,12 @@ const DatasetModal = ({ selectedIds, onClose, onSuccess }: { selectedIds: string
     e.preventDefault();
     setLoading(true);
     try {
-      await api.createDataset({ ...formData, sampleIds: selectedIds });
+      // 在这里强制带上 creator 字段传给 API，覆盖后端的 '当前用户' 默认值
+      await api.createDataset({ 
+        ...formData, 
+        sampleIds: selectedIds,
+        creator: `${currentUser.name} ${currentUser.id}`
+      });
       onSuccess();
     } catch(e) { alert('创建失败'); } finally { setLoading(false); }
   }
