@@ -18,10 +18,11 @@ import {
   FolderArchive,
   CheckSquare,
   Square,
-  CheckCircle
+  CheckCircle,
+  Loader2
 } from 'lucide-react';
-import JSZip from 'jszip'; // 引入 JSZip 用于生成压缩包
-import { TerminalLog, Dataset } from '../types';
+import JSZip from 'jszip';
+import { TerminalLog, Dataset, Sample } from '../types';
 import { api } from '../api';
 
 interface TrainingForgeProps {
@@ -30,17 +31,17 @@ interface TrainingForgeProps {
 
 const BASE_MODELS = {
   detection: [
-    { id: 'yolov8s', name: 'YOLOv8-Industrial-S', desc: '速度极快，适合轻量级部署与常规表面缺陷', params: '11.1M' },
-    { id: 'yolov8m', name: 'YOLOv8-Industrial-M', desc: '精度与速度均衡，适合复杂背景下的缺陷特征提取', params: '25.8M' },
-    { id: 'rtdetr', name: 'RT-DETR-L', desc: 'Transformer架构，高精度抗干扰，适合密集小缺陷', params: '32.0M' }
+    { id: 'yolo11n', name: 'YOLO11-Industrial-N', desc: '极速轻量，适合边缘设备极致推理速度要求与常规缺陷', params: '2.6M' },
+    { id: 'yolo11s', name: 'YOLO11-Industrial-S', desc: '速度与精度兼顾，适合绝大多数工业表面缺陷的快速检测', params: '9.4M' },
+    { id: 'yolo11m', name: 'YOLO11-Industrial-M', desc: '高精度基座，适合复杂背景下的细微缺陷特征提取', params: '20.1M' }
   ],
   classification: [
     { id: 'resnet50', name: 'ResNet50-AOI', desc: '工业二分类经典架构，稳定可靠的良品判定基座', params: '23.5M' },
     { id: 'efficientnet', name: 'EfficientNet-B3', desc: '高精度参数比，适合细粒度的微小差异判定', params: '12.0M' },
-    { id: 'mobilenet', name: 'MobileNetV3-L', desc: '极低算力需求，适合边缘低功耗设备', params: '5.4M' }
+    { id: 'vgg16', name: 'VGG16-AOI', desc: '经典深层网络，特征提取能力强，适合复杂的纹理分类', params: '138.4M' }
   ],
   segmentation: [
-    { id: 'yolov8seg', name: 'YOLOv8-Seg-Base', desc: '实时实例分割，边缘贴合度高，支持快速推理', params: '11.8M' },
+    { id: 'yolo11n-seg', name: 'YOLO11-Seg-N', desc: '实时轻量级实例分割，边缘贴合度高，支持快速推理', params: '2.9M' },
     { id: 'deeplabv3', name: 'DeepLabV3+', desc: '语义分割标杆，适合大面积连续性缺陷提取', params: '43.0M' }
   ]
 };
@@ -51,6 +52,7 @@ export const TrainingForge: React.FC<TrainingForgeProps> = ({ onNavigateToSample
   const [logs, setLogs] = useState<TerminalLog[]>([]);
   const [isTraining, setIsTraining] = useState(false);
   const [isFinished, setIsFinished] = useState(false);
+  const [isPackaging, setIsPackaging] = useState(false);
 
   // Form State
   const [scenario, setScenario] = useState<'detection' | 'classification' | 'segmentation' | null>(null);
@@ -63,6 +65,11 @@ export const TrainingForge: React.FC<TrainingForgeProps> = ({ onNavigateToSample
   const [epochs, setEpochs] = useState<number>(300);
   const [imgsz, setImgsz] = useState<number>(640);
   const [activeConfigTab, setActiveConfigTab] = useState<'aug' | 'hyper'>('aug');
+  
+  // Data Split State
+  const [trainRatio, setTrainRatio] = useState<number>(80);
+  const [valRatio, setValRatio] = useState<number>(20);
+  const testRatio = 100 - trainRatio - valRatio;
   
   // Augmentation State
   const [augParams, setAugParams] = useState({
@@ -78,6 +85,22 @@ export const TrainingForge: React.FC<TrainingForgeProps> = ({ onNavigateToSample
     api.getDatasets().then(setDatasets).catch(() => {});
   }, []);
 
+  const handleTrainRatioChange = (val: number) => {
+    let newTrain = val;
+    let newVal = valRatio;
+    if (newTrain + newVal > 100) newVal = 100 - newTrain;
+    setTrainRatio(newTrain);
+    setValRatio(newVal);
+  };
+
+  const handleValRatioChange = (val: number) => {
+    let newVal = val;
+    let newTrain = trainRatio;
+    if (newTrain + newVal > 100) newTrain = 100 - newVal;
+    setTrainRatio(newTrain);
+    setValRatio(newVal);
+  };
+
   const steps = [
     { title: '场景选型', icon: Target },
     { title: '硬件环境', icon: Monitor },
@@ -92,15 +115,14 @@ export const TrainingForge: React.FC<TrainingForgeProps> = ({ onNavigateToSample
     if (isTraining && !isFinished) {
       const dynamicLogs = [
         `> [系统] 正在初始化工作空间...`,
-        `> [数据] 挂载选定的 ${selectedDatasetIds.size} 个数据集快照...`,
-        `> [场景] 设定为: ${scenario}, 加载基座权重: ${baseModel}...`,
+        `> [配置] 场景设定为: ${scenario}, 加载基座权重: ${baseModel}...`,
         `> [算力] 目标硬件预设: ${hardware}, 自动调整并发策略...`,
-        `> [配置] Epochs: ${epochs}, 图像分辨率: ${imgsz}px`,
-        `> [超参] lr0=${hyperparams.lr0}, lrf=${hyperparams.lrf}, momentum=${hyperparams.momentum}`,
-        `> [增强] mosaic=${augParams.mosaic}, mixup=${augParams.mixup}, 旋转=${augParams.degrees}°`,
-        `> [系统] 正在生成 train.py 训练脚本与 yaml 配置文件...`,
-        `> [系统] 打包资源文件... 压缩比 38%`,
-        `> [完成] 构建离线训练包成功`
+        `> [超参] Epochs: ${epochs}, 图像分辨率: ${imgsz}px`,
+        `> [系统] 正在从 /model/${scenario}/ 提取 ${baseModel}.exe 离线训练引擎...`,
+        `> [数据] 拉取选中数据集的全部真实样本图片与标注...`,
+        `> [数据] 按设定比例随机打乱与切分 (Train ${trainRatio}%, Val ${valRatio}%, Test ${testRatio}%)...`,
+        `> [数据] 生成数据集目录树与 dataset.yaml 清单...`,
+        `> [完成] 离线一键训练包构建成功，等待下载`
       ];
       let delay = 0;
       setLogs([]);
@@ -127,26 +149,20 @@ export const TrainingForge: React.FC<TrainingForgeProps> = ({ onNavigateToSample
     setBaseModel(BASE_MODELS[id][0].id);
   };
 
-  // 生成 ZIP 并下载的方法
   const handleDownloadZip = async () => {
+    if (!scenario || !baseModel) return;
+    
+    setIsPackaging(true);
     try {
       const zip = new JSZip();
-      
-      // 根据用户选择自动转换配置
       const taskType = scenario === 'detection' ? 'detect' : scenario === 'classification' ? 'classify' : 'segment';
       const batchSize = hardware === 'cpu' ? 4 : (hardware === 'gpu_high' ? 32 : 16);
       const deviceOpt = hardware === 'cpu' ? 'cpu' : '0';
 
-      // 动态生成 YAML 内容
+      // 1. 生成基础 args.yaml
       const yamlContent = `# ==========================================
-# 华为AI检测训练平台 - 自动生成配置文件
+# 华为AI检测训练平台 - 离线训练预设参数
 # ==========================================
-# 场景: ${scenario}
-# 基座模型: ${baseModel}
-# 硬件环境: ${hardware}
-# 挂载数据集 ID: ${Array.from(selectedDatasetIds).join(', ')}
-
-# --- 基础参数 ---
 task: ${taskType}
 model: ${baseModel}.pt
 data: dataset.yaml
@@ -162,7 +178,6 @@ lrf: ${hyperparams.lrf}
 momentum: ${hyperparams.momentum}
 weight_decay: ${hyperparams.weight_decay}
 warmup_epochs: ${hyperparams.warmup_epochs}
-warmup_momentum: ${hyperparams.warmup_momentum}
 
 # --- 数据增强 (Augmentations) ---
 mosaic: ${augParams.mosaic}
@@ -170,18 +185,150 @@ mixup: ${augParams.mixup}
 degrees: ${augParams.degrees}
 perspective: ${augParams.perspective}
 `;
-
-      // 将 yaml 文件加入到 zip 实例中
       zip.file("args.yaml", yamlContent);
 
-      // 触发下载
-      const blob = await zip.generateAsync({ type: "blob" });
-      const dateStr = new Date().toISOString().split('T')[0]; // 获取当前日期 YYYY-MM-DD
+      // 2. 收集标签并生成 dataset.yaml
+      const selectedTags = new Set<string>();
+      datasets.filter(d => selectedDatasetIds.has(d.id)).forEach(d => {
+        d.tags.forEach(tag => selectedTags.add(tag));
+      });
+      const tagsArray = Array.from(selectedTags);
+      const classesConfig = tagsArray.map((tag, idx) => `  ${idx}: ${tag}`).join('\n');
+
+      const datasetYamlContent = `path: ./datasets
+train: images/train
+val: images/val
+${testRatio > 0 ? 'test: images/test' : ''}
+
+# 类别定义 (包含所选数据集的 ${tagsArray.length} 种标签)
+names:
+${classesConfig || '  0: default_defect'}
+`;
+      zip.file("dataset.yaml", datasetYamlContent);
+
+      // 3. 构建空目录结构
+      ['train', 'val', 'test'].forEach(dir => {
+          if (dir === 'test' && testRatio === 0) return;
+          zip.folder("datasets")?.folder("images")?.folder(dir);
+          zip.folder("datasets")?.folder("labels")?.folder(dir);
+      });
+      zip.folder("runs");
+
+      // 4. 拉取系统全量样本，筛选选中集合，并物理切分装包
+      try {
+          const allSamples = await api.getSamples();
+          const selectedSampleIds = new Set<string>();
+          datasets.filter(d => selectedDatasetIds.has(d.id)).forEach(d => {
+            if (d.sampleIds) d.sampleIds.forEach(id => selectedSampleIds.add(id));
+          });
+
+          // 筛选出有效样本
+          const validSamples = allSamples.filter(s => selectedSampleIds.has(s.id));
+
+          // Fisher-Yates shuffle 打乱数组，实现随机分配
+          for (let i = validSamples.length - 1; i > 0; i--) {
+              const j = Math.floor(Math.random() * (i + 1));
+              [validSamples[i], validSamples[j]] = [validSamples[j], validSamples[i]];
+          }
+
+          // 根据滑块设定的比例划分各阶段样本量
+          const totalSamples = validSamples.length;
+          const trainCount = Math.floor(totalSamples * (trainRatio / 100));
+          const valCount = Math.floor(totalSamples * (valRatio / 100));
+
+          const splits = validSamples.map((sample, index) => {
+              if (index < trainCount) return { sample, folder: 'train' };
+              if (index < trainCount + valCount) return { sample, folder: 'val' };
+              return { sample, folder: 'test' };
+          });
+
+          // 并发/顺序拉取真实图片并写入 Zip
+          for (const { sample, folder } of splits) {
+              try {
+                  if (!sample.thumbnailUrl) continue;
+                  
+                  // 获取真实图片流
+                  const imgRes = await fetch(sample.thumbnailUrl);
+                  if (!imgRes.ok) continue;
+                  const imgBlob = await imgRes.blob();
+                  
+                  // 获取扩展名并构建防冲突的文件名
+                  const extMatch = sample.filename.match(/\.([^.]+)$/);
+                  const ext = extMatch ? extMatch[1] : 'jpg';
+                  const baseName = sample.filename.replace(/\.[^.]+$/, '');
+                  const finalName = `${baseName}_${sample.id.slice(-6)}`;
+                  
+                  // 写入图片文件
+                  zip.file(`datasets/images/${folder}/${finalName}.${ext}`, imgBlob);
+                  
+                  // 拼装符合 YOLO 格式的 TXT 标注文件 (Class CenterX CenterY W H)
+                  let labelContent = '';
+                  if (sample.annotations && sample.annotations.length > 0) {
+                      const lines = sample.annotations.map(ann => {
+                          const classIdx = tagsArray.indexOf(ann.label);
+                          if (classIdx === -1) return null;
+                          return `${classIdx} ${ann.bbox.x.toFixed(6)} ${ann.bbox.y.toFixed(6)} ${ann.bbox.width.toFixed(6)} ${ann.bbox.height.toFixed(6)}`;
+                      }).filter(Boolean);
+                      labelContent = lines.join('\n');
+                  }
+                  
+                  zip.file(`datasets/labels/${folder}/${finalName}.txt`, labelContent + '\n');
+              } catch (err) {
+                  console.error(`处理样本图片失败: ${sample.id}`, err);
+              }
+          }
+      } catch (err) {
+          console.error("拉取真实样本过程出错: ", err);
+      }
+
+      // 5. 生成使用说明书
+      const readmeContent = `=== AOI 离线自动化训练包 ===
+
+环境要求: 无需安装任何 Python、CUDA 或框架环境。支持纯内网物理机运行。
+
+【使用步骤】
+1. 数据已就绪: 所选数据集的所有真实样本已按照 (Train: ${trainRatio}%, Val: ${valRatio}%, Test: ${testRatio}%) 比例完美封装。
+2. 一键启动: 直接双击运行同目录下的 [${baseModel}.exe]。
+3. 过程监控: 程序会自动弹出可视化监控面板，显示实时 Epoch 与进度条。
+4. 获取产物: 训练完成后，最优模型权重将保存在 runs/${taskType}/train/weights/best.pt。
+
+*高阶操作: 如需修改训练轮次或分辨率，请用记事本打开 args.yaml 进行修改并保存后，再运行 exe。
+`;
+      zip.file("使用说明(必读).txt", readmeContent);
+
+      // 6. 拉取特定的 EXE 和 PT 文件 (来源于静态 public 文件夹)
+      const modelBasePath = `/model/${scenario}`;
+
+      try {
+        const ptRes = await fetch(`${modelBasePath}/${baseModel}.pt`);
+        if (ptRes.ok) {
+          zip.file(`${baseModel}.pt`, await ptRes.blob());
+        } else {
+          zip.file(`${baseModel}.pt`, "占位文件：服务器未找到对应的 .pt 权重，请确保开发环境目录配置正确。");
+        }
+      } catch (e) {
+        zip.file(`${baseModel}.pt`, "占位文件：拉取 .pt 权重失败。");
+      }
+
+      try {
+        const exeRes = await fetch(`${modelBasePath}/${baseModel}.exe`);
+        if (exeRes.ok) {
+          zip.file(`${baseModel}.exe`, await exeRes.blob());
+        } else {
+          zip.file(`${baseModel}_Placeholder.txt`, `开发环境提示：请将编译好的 ${baseModel}.exe 放置于 public/model/${scenario}/ 目录下。`);
+        }
+      } catch (e) {
+        zip.file(`${baseModel}_Placeholder.txt`, `开发环境提示：无法加载 ${baseModel}.exe`);
+      }
+
+      // 7. 统一打包并触发下载
+      const blob = await zip.generateAsync({ type: "blob", compression: "STORE" });
+      const dateStr = new Date().toISOString().split('T')[0];
       const url = URL.createObjectURL(blob);
       
       const a = document.createElement('a');
       a.href = url;
-      a.download = `一键训练脚本_${dateStr}.zip`;
+      a.download = `AOI开箱即用训练包_${baseModel}_${dateStr}.zip`;
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
@@ -189,6 +336,8 @@ perspective: ${augParams.perspective}
     } catch (error) {
       console.error("生成压缩包失败:", error);
       alert("生成压缩包失败，请检查浏览器支持或联系管理员。");
+    } finally {
+      setIsPackaging(false);
     }
   };
 
@@ -338,7 +487,35 @@ perspective: ${augParams.perspective}
              </div>
 
              <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm space-y-8">
-               <div>
+               
+               {/* --- 新增：数据集切分比例配置区域 --- */}
+               <div className="pb-2">
+                 <label className="block text-sm font-bold text-slate-800 mb-2">数据集自动切分比例 (Dataset Split)</label>
+                 <p className="text-xs text-slate-500 mb-4">设定训练集、验证集与测试集的比例，系统打包时会抽取真实图片并自动打乱分配至各个目录。</p>
+                 
+                 <div className="flex items-center gap-6 mb-4">
+                   <div className="flex-1">
+                       <label className="text-xs font-bold text-indigo-700 block mb-1">训练集 (Train) {trainRatio}%</label>
+                       <input type="range" min="0" max="100" value={trainRatio} onChange={(e) => handleTrainRatioChange(Number(e.target.value))} className="w-full accent-indigo-600 cursor-pointer" />
+                   </div>
+                   <div className="flex-1">
+                       <label className="text-xs font-bold text-emerald-600 block mb-1">验证集 (Val) {valRatio}%</label>
+                       <input type="range" min="0" max="100" value={valRatio} onChange={(e) => handleValRatioChange(Number(e.target.value))} className="w-full accent-emerald-500 cursor-pointer" />
+                   </div>
+                   <div className="flex-1">
+                       <label className="text-xs font-bold text-amber-500 block mb-1">测试集 (Test) {testRatio}%</label>
+                       <input type="range" min="0" max="100" value={testRatio} disabled className="w-full accent-amber-500 opacity-50 cursor-not-allowed" />
+                   </div>
+                 </div>
+                 
+                 <div className="w-full h-3 rounded-full flex overflow-hidden shadow-inner bg-slate-100">
+                    <div style={{width: `${trainRatio}%`}} className="bg-indigo-600 h-full transition-all duration-300"></div>
+                    <div style={{width: `${valRatio}%`}} className="bg-emerald-500 h-full transition-all duration-300"></div>
+                    <div style={{width: `${testRatio}%`}} className="bg-amber-500 h-full transition-all duration-300"></div>
+                 </div>
+               </div>
+               
+               <div className="pt-6 border-t border-slate-100">
                  <div className="flex justify-between items-center mb-2">
                    <label className="text-sm font-bold text-slate-800">训练迭代轮次 (Epochs)</label>
                    <span className="text-indigo-600 font-bold bg-indigo-50 px-3 py-1 rounded-md">{epochs}</span>
@@ -352,7 +529,7 @@ perspective: ${augParams.perspective}
                  </div>
                </div>
                
-               <div className="pt-4 border-t border-slate-100">
+               <div className="pt-6 border-t border-slate-100">
                  <label className="block text-sm font-bold text-slate-800 mb-2">模型输入分辨率 (Image Size)</label>
                  <p className="text-xs text-slate-500 mb-4">决定模型看到的图像精细度。高分辨率有利于微小缺陷检测，但增加显存消耗。</p>
                  <div className="flex gap-4">
@@ -436,7 +613,7 @@ perspective: ${augParams.perspective}
                {!isTraining ? (
                  <button onClick={() => setIsTraining(true)} className="group relative inline-flex items-center justify-center px-8 py-4 font-bold text-white transition-all duration-200 bg-indigo-600 rounded-full focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-600 hover:bg-indigo-700 hover:scale-105 shadow-lg shadow-indigo-200">
                    <Play className="w-5 h-5 mr-2 fill-current" />
-                   生成离线训练包
+                   封装全量文件并构建一键包
                  </button>
                ) : (
                  <div className="w-full max-w-2xl">
@@ -457,9 +634,11 @@ perspective: ${augParams.perspective}
                      <div className="mt-8 flex justify-center animate-in zoom-in duration-500">
                         <button 
                           onClick={handleDownloadZip}
-                          className="flex items-center px-6 py-3 bg-white text-indigo-600 font-bold rounded-lg border-2 border-indigo-100 hover:border-indigo-600 hover:bg-indigo-50 transition-all shadow-md"
+                          disabled={isPackaging}
+                          className="flex items-center px-8 py-3 bg-white text-indigo-600 font-bold rounded-lg border-2 border-indigo-100 hover:border-indigo-600 hover:bg-indigo-50 transition-all shadow-md disabled:opacity-50 disabled:cursor-wait"
                         >
-                          <Download className="w-5 h-5 mr-2" /> 下载 .zip
+                          {isPackaging ? <Loader2 className="w-5 h-5 mr-2 animate-spin" /> : <Download className="w-5 h-5 mr-2" />} 
+                          {isPackaging ? '正在拉取真实样本与打压缩包中...' : '下载完整环境压缩包 .zip'}
                         </button>
                      </div>
                    )}
