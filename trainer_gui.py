@@ -10,10 +10,36 @@ from flask import Flask, jsonify, request
 from ultralytics import YOLO
 
 # ==========================================
-# 1. 全局状态与核心变量
+# 核心修复 1：防止 PyInstaller 无控制台模式下，tqdm 进度条因 sys.stdout 为 None 导致崩溃
 # ==========================================
+class DummyStream:
+    def write(self, data): pass
+    def flush(self): pass
+    def isatty(self): return False
+
+if sys.stdout is None:
+    sys.stdout = DummyStream()
+if sys.stderr is None:
+    sys.stderr = DummyStream()
+
+# ==========================================
+# 核心修复 2：兼容 PyInstaller 打包的 EXE 路径机制
+# ==========================================
+if getattr(sys, 'frozen', False):
+    BASE_DIR = os.path.dirname(sys.executable)
+else:
+    BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
+os.chdir(BASE_DIR)
+
+ARGS_PATH = os.path.join(BASE_DIR, "args.yaml")
+RUNS_LAST_PT = os.path.join(BASE_DIR, "runs", "detect", "train", "weights", "last.pt")
+
 app = Flask(__name__)
 
+# ==========================================
+# 1. 全局状态与核心变量
+# ==========================================
 STATE = {
     "status": "idle",  
     "message": "就绪，等待指令...",
@@ -50,14 +76,25 @@ def run_yolo(resume=False, device_choice=None):
     log_msg(f"=== AOI 引擎 {'断点续训' if resume else '全新训练'}启动 ===")
 
     try:
-        with open("args.yaml", "r", encoding="utf-8") as f:
-            args = yaml.safe_load(f)
+        args = {}
+        if os.path.exists(ARGS_PATH):
+            with open(ARGS_PATH, "r", encoding="utf-8") as f:
+                args = yaml.safe_load(f) or {}
+            log_msg(f"已成功加载配置文件: {ARGS_PATH}")
+        else:
+            log_msg(f"⚠️ 警告: 找不到配置文件 {ARGS_PATH}")
+            log_msg("⚠️ 请检查文件是否和 EXE 放在同一个文件夹，且没有被隐藏扩展名")
+            log_msg("正在使用系统默认内置参数启动...")
+            args = {"model": "yolo11n.pt", "epochs": 100, "data": "dataset.yaml"}
         
-        model_weight = "runs/detect/train/weights/last.pt" if resume else args.get("model", "yolo11n.pt")
+        model_weight = RUNS_LAST_PT if resume else args.get("model", "yolo11n.pt")
+        
         if resume and not os.path.exists(model_weight):
-            raise FileNotFoundError("找不到断点文件 last.pt！请确认之前是否有成功运行过。")
+            raise FileNotFoundError(f"找不到断点文件 {model_weight}！请确认之前是否有成功运行过。")
 
         log_msg(f"加载模型权重: {model_weight}")
+        
+        os.chdir(BASE_DIR)
         model = YOLO(model_weight)
 
         def on_train_epoch_end(trainer):
@@ -74,9 +111,7 @@ def run_yolo(resume=False, device_choice=None):
                     if k in metrics: return float(metrics[k])
                 return 0.0
 
-            # 抓取 GPU 显存占用
             gpu_mem = f"{torch.cuda.memory_reserved() / 1E9:.2f}G" if torch.cuda.is_available() else "0G"
-            # 抓取当前分辨率 Size
             img_size = trainer.args.imgsz if hasattr(trainer, 'args') else args.get('imgsz', 640)
 
             epoch_info = {
@@ -90,7 +125,7 @@ def run_yolo(resume=False, device_choice=None):
                 "map50_95": get_metric(['metrics/mAP50-95(B)', 'mAP50-95', 'metrics/mAP_0.5:0.95'])
             }
             STATE["epochs_data"].append(epoch_info)
-            log_msg(f"Epoch {current} 完成 | Box: {epoch_info['box_loss']:.3f} | Cls: {epoch_info['cls_loss']:.3f} | DFL: {epoch_info['dfl_loss']:.3f} | mAP@50: {epoch_info['map50']:.4f}")
+            log_msg(f"Epoch {current} 完成 | Box: {epoch_info['box_loss']:.3f} | mAP@50: {epoch_info['map50']:.4f}")
 
             if stop_requested:
                 log_msg("接收到终止指令，正在执行安全保存退出...")
@@ -101,29 +136,28 @@ def run_yolo(resume=False, device_choice=None):
         valid_args = {k: v for k, v in args.items() if k not in ['task']}
         if resume: valid_args['resume'] = True
         
-        # 拦截并自动修复 dataset.yaml 路径异常
         data_path = valid_args.get("data", "dataset.yaml")
-        if os.path.exists(data_path):
+        abs_data_path = os.path.join(BASE_DIR, data_path) if not os.path.isabs(data_path) else data_path
+        
+        if os.path.exists(abs_data_path):
             try:
-                with open(data_path, "r", encoding="utf-8") as df:
+                with open(abs_data_path, "r", encoding="utf-8") as df:
                     ds_config = yaml.safe_load(df)
                 
-                base_dir = os.path.abspath(".")
-                
-                if os.path.exists(os.path.join(base_dir, "datasets", "images")):
-                    ds_config["path"] = os.path.join(base_dir, "datasets")
+                if os.path.exists(os.path.join(BASE_DIR, "datasets", "images")):
+                    ds_config["path"] = os.path.join(BASE_DIR, "datasets")
                     log_msg("🔧 探测到嵌套的 datasets 目录，已自动对齐数据根路径。")
                 else:
-                    ds_config["path"] = base_dir 
+                    ds_config["path"] = BASE_DIR 
                     log_msg("🔧 已自动锁定数据绝对路径。")
                 
-                with open(data_path, "w", encoding="utf-8") as df:
+                with open(abs_data_path, "w", encoding="utf-8") as df:
                     yaml.dump(ds_config, df, allow_unicode=True, sort_keys=False)
                     
             except Exception as e:
                 log_msg(f"⚠️ 警告: 自动修复数据集路径失败 ({str(e)})")
         else:
-            log_msg("⚠️ 警告: 未找到指定的数据集配置文件！")
+            log_msg(f"⚠️ 警告: 未找到指定的数据集配置文件: {abs_data_path}")
 
         if device_choice:
             log_msg(f"用户手动指定计算设备: {device_choice.upper()}")
@@ -150,7 +184,9 @@ def run_yolo(resume=False, device_choice=None):
     except Exception as e:
         STATE["status"] = "error"
         STATE["message"] = "训练异常崩溃"
+        import traceback
         log_msg(f"[致命错误] {str(e)}")
+        log_msg(traceback.format_exc()) 
 
 # ==========================================
 # 3. Web API 接口
@@ -163,10 +199,11 @@ def get_config():
         "has_cuda": torch.cuda.is_available(),
         "gpu_name": torch.cuda.get_device_name(0) if torch.cuda.is_available() else "无"
     }
-    if os.path.exists("args.yaml"):
+    
+    if os.path.exists(ARGS_PATH):
         try:
-            with open("args.yaml", "r", encoding="utf-8") as f:
-                args = yaml.safe_load(f)
+            with open(ARGS_PATH, "r", encoding="utf-8") as f:
+                args = yaml.safe_load(f) or {}
             config["model"] = args.get("model", "yolo11n.pt")
             config["epochs"] = args.get("epochs", "-")
             config["batch"] = args.get("batch", "-")
@@ -175,9 +212,11 @@ def get_config():
             data_val = args.get("data", "dataset.yaml")
             config["dataset"] = data_val
             
-            if isinstance(data_val, str) and os.path.exists(data_val):
-                with open(data_val, "r", encoding="utf-8") as df:
-                    ds = yaml.safe_load(df)
+            abs_data_path = os.path.join(BASE_DIR, data_val) if not os.path.isabs(data_val) else data_val
+            
+            if os.path.exists(abs_data_path):
+                with open(abs_data_path, "r", encoding="utf-8") as df:
+                    ds = yaml.safe_load(df) or {}
                     names = ds.get("names", [])
                     if isinstance(names, dict): names = list(names.values())
                     if names:
@@ -187,7 +226,7 @@ def get_config():
         except Exception as e:
             log_msg(f"解析配置警告: {e}")
             
-    config["has_last"] = os.path.exists("runs/detect/train/weights/last.pt")
+    config["has_last"] = os.path.exists(RUNS_LAST_PT)
     STATE["config"] = config
     return jsonify(config)
 
@@ -504,7 +543,50 @@ HTML_TEMPLATE = """
 def index():
     return HTML_TEMPLATE
 
+# ==========================================
+# 5. 系统托盘与程序入口
+# ==========================================
+def open_ui():
+    webbrowser.open("http://127.0.0.1:5000")
+
 if __name__ == "__main__":
-    print("正在启动 AOI Web 训练控制台...")
-    threading.Timer(1.0, lambda: webbrowser.open("http://127.0.0.1:5000")).start()
-    app.run(host="127.0.0.1", port=5000, threaded=True)
+    print(f"正在启动 AOI Web 训练控制台 (运行真实物理目录: {BASE_DIR})...")
+    
+    flask_thread = threading.Thread(target=lambda: app.run(host="127.0.0.1", port=5000, threaded=True, use_reloader=False))
+    flask_thread.daemon = True
+    flask_thread.start()
+    
+    threading.Timer(1.0, open_ui).start()
+
+    try:
+        import pystray
+        from PIL import Image, ImageDraw
+
+        def create_icon_image():
+            width = 64
+            height = 64
+            image = Image.new('RGB', (width, height), color=(30, 41, 59))  
+            dc = ImageDraw.Draw(image)
+            dc.ellipse((12, 12, 52, 52), fill=(59, 130, 246)) 
+            return image
+
+        def on_open(icon, item):
+            open_ui()
+
+        def on_exit(icon, item):
+            print("正在关闭并退出程序...")
+            icon.stop()
+            os._exit(0) 
+
+        menu = pystray.Menu(
+            pystray.MenuItem('🌐 打开网页控制台', on_open, default=True),
+            pystray.MenuItem('❌ 强制退出程序', on_exit)
+        )
+
+        tray_icon = pystray.Icon("AOI_Trainer", create_icon_image(), "AOI 训练控制台", menu)
+        tray_icon.run()
+
+    except ImportError:
+        print("\n[提示] 缺少 pystray 或 Pillow 库，将以无系统托盘模式运行。")
+        while True:
+            time.sleep(1)
