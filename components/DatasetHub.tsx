@@ -1,9 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { FolderArchive, Calendar, Trash2, HardDrive, Target, Layers, Download } from 'lucide-react';
-import { Dataset } from '../types';
+import { Dataset, UserInfo } from '../types';
 import { api } from '../api';
 
-export const DatasetHub: React.FC = () => {
+export const DatasetHub: React.FC<{ currentUser: UserInfo }> = ({ currentUser }) => {
   const [datasets, setDatasets] = useState<Dataset[]>([]);
 
   useEffect(() => { loadData(); }, []);
