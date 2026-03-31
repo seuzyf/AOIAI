@@ -50,11 +50,12 @@ export const api = {
   },
 
   getModels: async (): Promise<AIModel[]> => (await fetch(`${API_BASE}/models`)).json(),
-  uploadModel: async (data: { name: string; target: string; desc: string; file: File }) => {
+  uploadModel: async (data: { name: string; target: string; desc: string; uploader: string; file: File }) => {
     const formData = new FormData();
     formData.append('name', data.name);
     formData.append('target', data.target);
     formData.append('desc', data.desc);
+    formData.append('uploader', data.uploader);
     formData.append('file', data.file);
     const res = await fetch(`${API_BASE}/models/upload`, { method: 'POST', body: formData });
     return res.json();
