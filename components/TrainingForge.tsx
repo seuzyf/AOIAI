@@ -363,7 +363,7 @@ perspective: ${augParams.perspective}
       
       const a = document.createElement('a');
       a.href = url;
-      a.download = `AOI开箱即用训练包_${baseModel}_${dateStr}.zip`;
+      a.download = `AI开箱即用训练包_${baseModel}_${dateStr}.zip`;
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
