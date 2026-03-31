@@ -223,7 +223,7 @@ app.post('/api/samples/upload-batch', uploadImage.array('files'), (req, res) => 
       id: `PCB-${Date.now()}-${Math.floor(Math.random()*1000)}`,
       filename: originalUtf8,
       thumbnailUrl: `/images/${file.filename}`,
-      line: line || 'WIRELESS',
+      line: line || '无线',
       process: process || 'SMT',
       device: device || 'BENCHUANG',
       defects: [], annotations: [],
@@ -292,7 +292,7 @@ app.post('/api/samples/upload-zip', uploadImage.single('file'), async (req, res)
 
       samples.unshift({
         id: `PCB-ARCHIVE-${Date.now()}-${Math.floor(Math.random()*1000)}`, filename: imgName, thumbnailUrl: `/images/${newFilename}`,
-        line: line || 'WIRELESS', process: process || 'SMT', device: device || 'BENCHUANG',
+        line: line || '无线', process: process || 'SMT', device: device || 'BENCHUANG',
         defects, annotations, status: annotations.length > 0 ? 'LABELED' : 'UNLABELED', uploadDate: new Date().toISOString().split('T')[0]
       });
       addedCount++;
@@ -322,14 +322,14 @@ app.put('/api/samples/:id/annotate', (req, res) => {
 });
 
 app.post('/api/datasets/create', (req, res) => { 
-  const { name, sampleIds, version, date } = req.body;
+  const { name, sampleIds, version, date, creator } = req.body;
   const datasets = readDB('datasets.json');
   const samples = readDB('samples.json').filter(s => sampleIds.includes(s.id));
   const ds = {
     id: `ds-${Date.now()}`, name, count: sampleIds.length,
     tags: [...new Set(samples.flatMap(s => s.defects))], lines: [...new Set(samples.map(s => s.line))],
     processes: [...new Set(samples.map(s => s.process))], devices: [...new Set(samples.map(s => s.device))],
-    creator: '当前用户', createDate: date || new Date().toISOString().split('T')[0],
+    creator: creator || '当前用户', createDate: date || new Date().toISOString().split('T')[0],
     version: version || 'v1.0', sampleIds
   };
   datasets.unshift(ds); writeDB('datasets.json', datasets); res.json(ds);
@@ -345,11 +345,11 @@ app.post('/api/datasets/delete', (req, res) => {
 app.get('/api/models', (req, res) => res.json(readDB('models.json')));
 
 app.post('/api/models/upload', uploadModel.single('file'), async (req, res) => {
-  const { name, target, desc } = req.body;
+  const { name, target, desc, uploader } = req.body;
   const models = readDB('models.json');
   
   let newModel = { 
-    id: `m-${Date.now()}`, name, uploader: '当前用户', target, version: 'v1.0.0', 
+    id: `m-${Date.now()}`, name, uploader: uploader || '当前用户', target, version: 'v1.0.0', 
     size: req.file ? `${(req.file.size / (1024 * 1024)).toFixed(2)} MB` : '未知大小', 
     uploadDate: new Date().toISOString().split('T')[0], description: desc, 
     filePath: null, metrics: { precision: 0, recall: 0, map50: 0 }, chartUrl: null, csvData: [], args: {}
