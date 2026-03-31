@@ -20,6 +20,7 @@ import {
   Square,
   CheckCircle
 } from 'lucide-react';
+import JSZip from 'jszip'; // 引入 JSZip 用于生成压缩包
 import { TerminalLog, Dataset } from '../types';
 import { api } from '../api';
 
@@ -97,9 +98,9 @@ export const TrainingForge: React.FC<TrainingForgeProps> = ({ onNavigateToSample
         `> [配置] Epochs: ${epochs}, 图像分辨率: ${imgsz}px`,
         `> [超参] lr0=${hyperparams.lr0}, lrf=${hyperparams.lrf}, momentum=${hyperparams.momentum}`,
         `> [增强] mosaic=${augParams.mosaic}, mixup=${augParams.mixup}, 旋转=${augParams.degrees}°`,
-        `> [系统] 正在生成 train.py 训练脚本与 requirements.txt...`,
+        `> [系统] 正在生成 train.py 训练脚本与 yaml 配置文件...`,
         `> [系统] 打包资源文件... 压缩比 38%`,
-        `> [完成] 构建离线训练包成功 (Training_Package.zip)`
+        `> [完成] 构建离线训练包成功`
       ];
       let delay = 0;
       setLogs([]);
@@ -124,6 +125,71 @@ export const TrainingForge: React.FC<TrainingForgeProps> = ({ onNavigateToSample
   const handleScenarioChange = (id: 'detection' | 'classification' | 'segmentation') => {
     setScenario(id);
     setBaseModel(BASE_MODELS[id][0].id);
+  };
+
+  // 生成 ZIP 并下载的方法
+  const handleDownloadZip = async () => {
+    try {
+      const zip = new JSZip();
+      
+      // 根据用户选择自动转换配置
+      const taskType = scenario === 'detection' ? 'detect' : scenario === 'classification' ? 'classify' : 'segment';
+      const batchSize = hardware === 'cpu' ? 4 : (hardware === 'gpu_high' ? 32 : 16);
+      const deviceOpt = hardware === 'cpu' ? 'cpu' : '0';
+
+      // 动态生成 YAML 内容
+      const yamlContent = `# ==========================================
+# 华为AI检测训练平台 - 自动生成配置文件
+# ==========================================
+# 场景: ${scenario}
+# 基座模型: ${baseModel}
+# 硬件环境: ${hardware}
+# 挂载数据集 ID: ${Array.from(selectedDatasetIds).join(', ')}
+
+# --- 基础参数 ---
+task: ${taskType}
+model: ${baseModel}.pt
+data: dataset.yaml
+epochs: ${epochs}
+imgsz: ${imgsz}
+device: '${deviceOpt}'
+batch: ${batchSize}
+workers: 8
+
+# --- 超参数 (Hyperparameters) ---
+lr0: ${hyperparams.lr0}
+lrf: ${hyperparams.lrf}
+momentum: ${hyperparams.momentum}
+weight_decay: ${hyperparams.weight_decay}
+warmup_epochs: ${hyperparams.warmup_epochs}
+warmup_momentum: ${hyperparams.warmup_momentum}
+
+# --- 数据增强 (Augmentations) ---
+mosaic: ${augParams.mosaic}
+mixup: ${augParams.mixup}
+degrees: ${augParams.degrees}
+perspective: ${augParams.perspective}
+`;
+
+      // 将 yaml 文件加入到 zip 实例中
+      zip.file("args.yaml", yamlContent);
+
+      // 触发下载
+      const blob = await zip.generateAsync({ type: "blob" });
+      const dateStr = new Date().toISOString().split('T')[0]; // 获取当前日期 YYYY-MM-DD
+      const url = URL.createObjectURL(blob);
+      
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `一键训练脚本_${dateStr}.zip`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch (error) {
+      console.error("生成压缩包失败:", error);
+      alert("生成压缩包失败，请检查浏览器支持或联系管理员。");
+    }
   };
 
   const renderStepContent = () => {
@@ -389,7 +455,10 @@ export const TrainingForge: React.FC<TrainingForgeProps> = ({ onNavigateToSample
                    </div>
                    {isFinished && (
                      <div className="mt-8 flex justify-center animate-in zoom-in duration-500">
-                        <button className="flex items-center px-6 py-3 bg-white text-indigo-600 font-bold rounded-lg border-2 border-indigo-100 hover:border-indigo-600 hover:bg-indigo-50 transition-all shadow-md">
+                        <button 
+                          onClick={handleDownloadZip}
+                          className="flex items-center px-6 py-3 bg-white text-indigo-600 font-bold rounded-lg border-2 border-indigo-100 hover:border-indigo-600 hover:bg-indigo-50 transition-all shadow-md"
+                        >
                           <Download className="w-5 h-5 mr-2" /> 下载 .zip
                         </button>
                      </div>
