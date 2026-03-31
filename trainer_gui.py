@@ -74,15 +74,23 @@ def run_yolo(resume=False, device_choice=None):
                     if k in metrics: return float(metrics[k])
                 return 0.0
 
+            # 抓取 GPU 显存占用
+            gpu_mem = f"{torch.cuda.memory_reserved() / 1E9:.2f}G" if torch.cuda.is_available() else "0G"
+            # 抓取当前分辨率 Size
+            img_size = trainer.args.imgsz if hasattr(trainer, 'args') else args.get('imgsz', 640)
+
             epoch_info = {
                 "epoch": current,
+                "gpu_mem": gpu_mem,
                 "box_loss": get_metric(['train/box_loss', 'loss/box']),
                 "cls_loss": get_metric(['train/cls_loss', 'loss/cls']),
+                "dfl_loss": get_metric(['train/dfl_loss', 'loss/dfl']),
+                "size": img_size,
                 "map50": get_metric(['metrics/mAP50(B)', 'mAP50', 'metrics/mAP_0.5']),
                 "map50_95": get_metric(['metrics/mAP50-95(B)', 'mAP50-95', 'metrics/mAP_0.5:0.95'])
             }
             STATE["epochs_data"].append(epoch_info)
-            log_msg(f"Epoch {current} 完成 | mAP@50: {epoch_info['map50']:.4f}")
+            log_msg(f"Epoch {current} 完成 | Box: {epoch_info['box_loss']:.3f} | Cls: {epoch_info['cls_loss']:.3f} | DFL: {epoch_info['dfl_loss']:.3f} | mAP@50: {epoch_info['map50']:.4f}")
 
             if stop_requested:
                 log_msg("接收到终止指令，正在执行安全保存退出...")
@@ -93,19 +101,15 @@ def run_yolo(resume=False, device_choice=None):
         valid_args = {k: v for k, v in args.items() if k not in ['task']}
         if resume: valid_args['resume'] = True
         
-        # ---------------------------------------------------------
-        # 【新增修复核心】：拦截并自动修复 dataset.yaml 路径异常
-        # ---------------------------------------------------------
+        # 拦截并自动修复 dataset.yaml 路径异常
         data_path = valid_args.get("data", "dataset.yaml")
         if os.path.exists(data_path):
             try:
                 with open(data_path, "r", encoding="utf-8") as df:
                     ds_config = yaml.safe_load(df)
                 
-                # 智能探测：获取当前 exe/脚本 所在的绝对目录
                 base_dir = os.path.abspath(".")
                 
-                # 判断图片到底是在当前目录的 images 里，还是被打包在了 datasets/images 里
                 if os.path.exists(os.path.join(base_dir, "datasets", "images")):
                     ds_config["path"] = os.path.join(base_dir, "datasets")
                     log_msg("🔧 探测到嵌套的 datasets 目录，已自动对齐数据根路径。")
@@ -113,7 +117,6 @@ def run_yolo(resume=False, device_choice=None):
                     ds_config["path"] = base_dir 
                     log_msg("🔧 已自动锁定数据绝对路径。")
                 
-                # 将修正后的带绝对路径的配置写回硬盘
                 with open(data_path, "w", encoding="utf-8") as df:
                     yaml.dump(ds_config, df, allow_unicode=True, sort_keys=False)
                     
@@ -121,7 +124,6 @@ def run_yolo(resume=False, device_choice=None):
                 log_msg(f"⚠️ 警告: 自动修复数据集路径失败 ({str(e)})")
         else:
             log_msg("⚠️ 警告: 未找到指定的数据集配置文件！")
-        # ---------------------------------------------------------
 
         if device_choice:
             log_msg(f"用户手动指定计算设备: {device_choice.upper()}")
@@ -233,20 +235,20 @@ HTML_TEMPLATE = """
         tailwind.config = { darkMode: 'class', theme: { extend: { colors: { slate: { 850: '#151e2e' } } } } }
     </script>
     <style>
-        ::-webkit-scrollbar { width: 8px; height: 8px; }
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
         ::-webkit-scrollbar-track { background: #0f172a; }
         ::-webkit-scrollbar-thumb { background: #334155; border-radius: 4px; }
         ::-webkit-scrollbar-thumb:hover { background: #475569; }
-        .table-container { max-height: 400px; overflow-y: auto; }
+        .table-container { max-height: 400px; overflow-y: auto; overflow-x: auto;}
     </style>
 </head>
 <body class="bg-slate-900 text-slate-200 font-sans min-h-screen p-6">
-    <div class="max-w-6xl mx-auto space-y-6">
+    <div class="max-w-7xl mx-auto space-y-6">
         
         <header class="flex justify-between items-end border-b border-slate-700 pb-4">
             <div>
-                <h1 class="text-3xl font-bold text-white tracking-wide">AOI 模型离线训练节点 <span class="text-blue-500 text-xl align-top">PRO</span></h1>
-                <p class="text-slate-400 mt-1">YOLO11 Local Computation Engine</p>
+                <h1 class="text-3xl font-bold text-white tracking-wide">AI 模型离线训练节点 <span class="text-blue-500 text-xl align-top">COE</span></h1>
+                <p class="text-slate-400 mt-1">华为AI检测训练平台</p>
             </div>
             <div id="status-badge" class="px-4 py-2 rounded-full font-semibold bg-slate-800 text-slate-300 border border-slate-600 shadow-sm transition-colors duration-300">
                 🟡 状态: 正在连接核心...
@@ -296,7 +298,7 @@ HTML_TEMPLATE = """
                             <option value="cpu">仅使用 CPU (兼容/极慢模式)</option>
                             <option value="0">使用 GPU 0 (NVIDIA 显卡加速)</option>
                         </select>
-                        <p id="gpu-tip" class="text-xs text-rose-400 mt-2 hidden">⚠️ 环境异常: 未检测到有效的 CUDA 或 NVIDIA 显卡驱动，请使用 CPU 模式或检查环境配置。</p>
+                        <p id="gpu-tip" class="text-xs text-rose-400 mt-2 hidden">⚠️ 环境异常: 未检测到有效的 CUDA，请使用 CPU 模式或检查驱动。</p>
                         <p id="gpu-ok" class="text-xs text-emerald-400 mt-2 hidden">✅ 已检测到硬件加速: <span id="cfg-gpuname"></span></p>
                     </div>
                     
@@ -331,14 +333,17 @@ HTML_TEMPLATE = """
                     <h2 class="font-semibold text-white">📊 训练指标追踪 (Metrics)</h2>
                 </div>
                 <div class="table-container flex-1 bg-slate-900/50 p-0">
-                    <table class="w-full text-left text-sm text-slate-300">
-                        <thead class="text-xs text-slate-400 uppercase bg-slate-800 sticky top-0 shadow-sm">
+                    <table class="w-full text-left text-sm text-slate-300 whitespace-nowrap">
+                        <thead class="text-xs text-slate-400 bg-slate-800 sticky top-0 shadow-sm z-10">
                             <tr>
-                                <th class="px-4 py-3">Epoch</th>
-                                <th class="px-4 py-3">Box Loss</th>
-                                <th class="px-4 py-3">Cls Loss</th>
-                                <th class="px-4 py-3 font-bold text-emerald-400">mAP@50</th>
-                                <th class="px-4 py-3">mAP@50-95</th>
+                                <th class="px-3 py-2">轮次<br><span class="text-[10px] text-slate-500 font-normal">Epoch</span></th>
+                                <th class="px-3 py-2">显存<br><span class="text-[10px] text-slate-500 font-normal">GPU_mem</span></th>
+                                <th class="px-3 py-2">边框损失<br><span class="text-[10px] text-slate-500 font-normal">box_loss</span></th>
+                                <th class="px-3 py-2">分类损失<br><span class="text-[10px] text-slate-500 font-normal">cls_loss</span></th>
+                                <th class="px-3 py-2">分布损失<br><span class="text-[10px] text-slate-500 font-normal">dfl_loss</span></th>
+                                <th class="px-3 py-2">尺寸<br><span class="text-[10px] text-slate-500 font-normal">Size</span></th>
+                                <th class="px-3 py-2 font-bold text-emerald-400">精度<br><span class="text-[10px] text-emerald-600 font-normal">mAP@50</span></th>
+                                <th class="px-3 py-2">综合精度<br><span class="text-[10px] text-slate-500 font-normal">mAP@50-95</span></th>
                             </tr>
                         </thead>
                         <tbody id="metrics-body" class="divide-y divide-slate-700/50"></tbody>
@@ -417,11 +422,14 @@ HTML_TEMPLATE = """
             els.empty.style.display = 'none';
             els.tbody.innerHTML = dataArray.map(d => `
                 <tr class="hover:bg-slate-800/50 transition-colors">
-                    <td class="px-4 py-2 font-mono">${d.epoch}</td>
-                    <td class="px-4 py-2 font-mono">${d.box_loss.toFixed(4)}</td>
-                    <td class="px-4 py-2 font-mono">${d.cls_loss.toFixed(4)}</td>
-                    <td class="px-4 py-2 font-mono text-emerald-400 font-bold">${d.map50.toFixed(4)}</td>
-                    <td class="px-4 py-2 font-mono text-slate-400">${d.map50_95.toFixed(4)}</td>
+                    <td class="px-3 py-2 font-mono">${d.epoch}</td>
+                    <td class="px-3 py-2 font-mono text-slate-400">${d.gpu_mem}</td>
+                    <td class="px-3 py-2 font-mono text-rose-400">${d.box_loss.toFixed(4)}</td>
+                    <td class="px-3 py-2 font-mono text-rose-400">${d.cls_loss.toFixed(4)}</td>
+                    <td class="px-3 py-2 font-mono text-rose-400">${d.dfl_loss.toFixed(4)}</td>
+                    <td class="px-3 py-2 font-mono text-slate-400">${d.size}</td>
+                    <td class="px-3 py-2 font-mono text-emerald-400 font-bold">${d.map50.toFixed(4)}</td>
+                    <td class="px-3 py-2 font-mono text-slate-400">${d.map50_95.toFixed(4)}</td>
                 </tr>
             `).join('');
             els.tbody.parentElement.parentElement.scrollTop = els.tbody.parentElement.parentElement.scrollHeight;
