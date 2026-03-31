@@ -3,7 +3,7 @@ import { GlobalClass, Sample, Dataset, AIModel } from './types';
 // 提供选项给前端组件使用
 export const DEVICE_BRANDS = ['BENCHUANG', 'SAKI', 'SHENZHOU', 'JUTZE', 'KOH_YOUNG'];
 export const PROCESS_TYPES = ['SPI', 'PRE_REFLOW', 'POST_REFLOW', 'DIP', 'SMT'];
-export const LINE_TYPES = ['WIRELESS', 'OPTICAL'];
+export const LINE_TYPES = ['无线', '光'];
 
 // Mock 基础数据省略（已迁移至后端统一管理），如果前端直接依赖这些变量也可以保留空数组或示例数据
 export const GLOBAL_CLASSES: GlobalClass[] = [];
