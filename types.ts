@@ -1,5 +1,21 @@
 export type AppTab = 'training' | 'samples' | 'datasets' | 'models' | 'settings';
 
+export type Role = 'admin' | 'engineer' | 'technician';
+
+export interface UserInfo {
+  name: string;
+  id: string;
+  role: Role;
+  roleName: string;
+  color: string;
+}
+
+export const ACCOUNTS: UserInfo[] = [
+  { name: '周扬帆', id: '00588771', role: 'admin', roleName: '管理员', color: 'bg-red-100 text-red-700 border-red-200' },
+  { name: '刘小兵', id: '00516052', role: 'engineer', roleName: '工程师', color: 'bg-blue-100 text-blue-700 border-blue-200' },
+  { name: '汪涛', id: '82025269', role: 'technician', roleName: '技师', color: 'bg-emerald-100 text-emerald-700 border-emerald-200' }
+];
+
 export interface Annotation {
   id: string;
   label: string;
