@@ -28,9 +28,9 @@ export const api = {
     return res.json();
   },
   deleteSample: async (id: string) => (await fetch(`${API_BASE}/samples/${id}`, { method: 'DELETE' })).json(),
-  annotateSample: async (id: string, annotations: any[]) => {
+  annotateSample: async (id: string, annotations: any[], annotator?: string) => {
     const res = await fetch(`${API_BASE}/samples/${id}/annotate`, {
-      method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ annotations })
+      method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ annotations, annotator })
     });
     return res.json();
   },
