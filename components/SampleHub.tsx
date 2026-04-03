@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Upload, FileUp, Search, Database, Loader2, Save, Trash2, Tag, ArrowLeft, Plus, Filter, CheckSquare, Square, FolderArchive, Image as ImageIcon, X } from 'lucide-react';
+import { Upload, FileUp, Search, Database, Loader2, Save, Trash2, Tag, ArrowLeft, Plus, Filter, CheckSquare, Square, FolderArchive, Image as ImageIcon, X, User, Undo } from 'lucide-react';
 import { Sample, Annotation, GlobalClass, UserInfo } from '../types';
 import { DEVICE_BRANDS, PROCESS_TYPES, LINE_TYPES } from '../constants';
 import { api } from '../api';
@@ -37,6 +37,20 @@ export const SampleHub: React.FC<{ currentUser: UserInfo }> = ({ currentUser }) 
     loadData();
   };
 
+  const handleBatchDelete = async () => {
+    if (selectedIds.size === 0) return;
+    if (!confirm(`确定要删除选中的 ${selectedIds.size} 项样本数据吗？此操作不可恢复。`)) return;
+
+    try {
+      await Promise.all(Array.from(selectedIds).map(id => api.deleteSample(id)));
+      setSelectedIds(new Set());
+      loadData();
+    } catch (e) {
+      console.error(e);
+      alert('批量删除时发生错误');
+    }
+  };
+
   const filteredSamples = samples.filter(s => {
     const matchSearch = s.filename.toLowerCase().includes(searchTerm.toLowerCase());
     const matchLine = filters.lines.length === 0 || filters.lines.includes(s.line);
@@ -58,7 +72,7 @@ export const SampleHub: React.FC<{ currentUser: UserInfo }> = ({ currentUser }) 
   };
 
   if (viewMode === 'editor' && selectedSample) {
-    return <RealAnnotationEditor sample={selectedSample} globalClasses={classes} onBack={() => { setViewMode('list'); loadData(); }} />;
+    return <RealAnnotationEditor sample={selectedSample} globalClasses={classes} currentUser={currentUser} onBack={() => { setViewMode('list'); loadData(); }} />;
   }
 
   return (
@@ -71,7 +85,6 @@ export const SampleHub: React.FC<{ currentUser: UserInfo }> = ({ currentUser }) 
             {classes.map(cls => (
               <div key={cls.id} style={{ borderColor: cls.color, color: cls.color }} className="px-2 py-0.5 bg-white rounded border text-xs font-bold whitespace-nowrap flex items-center gap-1.5 group transition-all">
                  {cls.name} 
-                 {/* 权限判断：仅管理员可删除全局缺陷类型 */}
                  {currentUser.role === 'admin' && (
                    <button onClick={() => handleDeleteClass(String(cls.id), cls.name)} className="opacity-0 w-0 group-hover:w-auto overflow-hidden group-hover:opacity-100 hover:bg-red-50 hover:text-red-500 rounded-full transition-all duration-200" title="删除该分类">
                      <X className="w-3 h-3" />
@@ -111,6 +124,13 @@ export const SampleHub: React.FC<{ currentUser: UserInfo }> = ({ currentUser }) 
           
           <div className="flex items-center gap-3">
              {selectedIds.size > 0 && <span className="text-sm text-indigo-600 font-bold bg-indigo-50 px-3 py-1 rounded-full">已选 {selectedIds.size} 项</span>}
+             
+             {currentUser.role !== 'technician' && (
+               <button disabled={selectedIds.size === 0} onClick={handleBatchDelete} className="px-4 py-1.5 text-sm font-bold bg-white text-red-500 border border-red-200 rounded-md flex items-center shadow-sm hover:bg-red-50 hover:border-red-300 disabled:opacity-50 disabled:cursor-not-allowed transition-colors">
+                  <Trash2 className="w-4 h-4 mr-2" /> 删除选中
+               </button>
+             )}
+
              <button disabled={selectedIds.size === 0} onClick={() => setDatasetModalOpen(true)} className="px-4 py-1.5 text-sm font-bold bg-indigo-600 text-white rounded-md flex items-center shadow-sm hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed">
                 <FolderArchive className="w-4 h-4 mr-2" /> 制作数据集
              </button>
@@ -167,6 +187,7 @@ export const SampleHub: React.FC<{ currentUser: UserInfo }> = ({ currentUser }) 
                 <th className="px-6 py-3">文件名</th>
                 <th className="px-6 py-3">属性信息</th>
                 <th className="px-6 py-3">标注信息</th>
+                <th className="px-6 py-3">最后标注人</th>
                 <th className="px-6 py-3">操作</th>
               </tr>
             </thead>
@@ -178,10 +199,11 @@ export const SampleHub: React.FC<{ currentUser: UserInfo }> = ({ currentUser }) 
                   <td className="px-6 py-3 font-medium text-slate-500">示例_请先在上方上传真实数据.jpg</td>
                   <td className="px-6 py-3 text-xs text-slate-400">线体: 示例 <br/> 工序: 示例 <br/> 设备: 示例</td>
                   <td className="px-6 py-3"><span className="px-2 py-0.5 rounded text-[10px] bg-slate-200 text-slate-500">示例状态</span></td>
+                  <td className="px-6 py-3 text-xs text-slate-400">-</td>
                   <td className="px-6 py-3 text-xs text-slate-400">仅供演示</td>
                 </tr>
               ) : filteredSamples.length === 0 ? (
-                <tr><td colSpan={6} className="text-center py-12 text-slate-400">没有符合条件的样本数据</td></tr>
+                <tr><td colSpan={7} className="text-center py-12 text-slate-400">没有符合条件的样本数据</td></tr>
               ) : filteredSamples.map((sample) => (
                 <tr key={sample.id} className={`hover:bg-slate-50 transition-colors ${selectedIds.has(sample.id) ? 'bg-indigo-50/30' : ''}`}>
                   <td className="px-4 py-3">
@@ -206,10 +228,17 @@ export const SampleHub: React.FC<{ currentUser: UserInfo }> = ({ currentUser }) 
                         }) : <span className="text-slate-400 italic">未标注</span>}
                      </div>
                   </td>
+                  <td className="px-6 py-3 text-xs font-medium text-slate-600">
+                    {sample.lastAnnotator ? (
+                      <div className="flex items-center gap-1">
+                        <User className="w-3.5 h-3.5 text-slate-400" />
+                        {sample.lastAnnotator}
+                      </div>
+                    ) : <span className="text-slate-300">-</span>}
+                  </td>
                   <td className="px-6 py-3">
                     <div className="flex items-center gap-2">
                       <button onClick={() => { setSelectedSample(sample); setViewMode('editor'); }} className="text-indigo-600 hover:text-indigo-800 font-medium px-3 py-1 bg-indigo-50 rounded text-xs">标注</button>
-                      {/* 权限判断：技师不能删除样本数据 */}
                       {currentUser.role !== 'technician' && (
                         <button onClick={() => handleDelete(sample.id)} className="text-red-500 hover:text-red-700 hover:bg-red-50 p-1.5 rounded"><Trash2 className="w-4 h-4" /></button>
                       )}
@@ -351,7 +380,6 @@ const DatasetModal = ({ selectedIds, onClose, onSuccess, currentUser }: { select
     e.preventDefault();
     setLoading(true);
     try {
-      // 在这里强制带上 creator 字段传给 API，覆盖后端的 '当前用户' 默认值
       await api.createDataset({ 
         ...formData, 
         sampleIds: selectedIds,
@@ -380,7 +408,7 @@ const DatasetModal = ({ selectedIds, onClose, onSuccess, currentUser }: { select
   )
 }
 
-const RealAnnotationEditor: React.FC<{ sample: Sample, globalClasses: GlobalClass[], onBack: () => void }> = ({ sample, globalClasses, onBack }) => {
+const RealAnnotationEditor: React.FC<{ sample: Sample, globalClasses: GlobalClass[], currentUser: UserInfo, onBack: () => void }> = ({ sample, globalClasses, currentUser, onBack }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   
   const [annotations, setAnnotations] = useState<Annotation[]>(sample.annotations || []);
@@ -478,8 +506,13 @@ const RealAnnotationEditor: React.FC<{ sample: Sample, globalClasses: GlobalClas
     }
   };
 
+  // 撤销上一步操作
+  const handleUndo = () => {
+    setAnnotations(prev => prev.slice(0, -1));
+  };
+
   const saveAnnotations = async () => {
-    await api.annotateSample(sample.id, annotations);
+    await api.annotateSample(sample.id, annotations, `${currentUser.name} ${currentUser.id}`);
     onBack();
   };
 
@@ -491,6 +524,13 @@ const RealAnnotationEditor: React.FC<{ sample: Sample, globalClasses: GlobalClas
            <span className="font-bold text-slate-800 break-all">{sample.filename}</span>
          </div>
          <div className="flex items-center gap-3">
+           <button 
+             onClick={handleUndo} 
+             disabled={annotations.length === 0} 
+             className="px-3 py-1.5 text-slate-600 hover:bg-slate-100 rounded text-sm flex items-center disabled:opacity-50 disabled:cursor-not-allowed"
+           >
+             <Undo className="w-4 h-4 mr-1"/> 撤销
+           </button>
            <button onClick={() => setAnnotations([])} className="px-3 py-1.5 text-slate-600 hover:bg-slate-100 rounded text-sm flex items-center"><Trash2 className="w-4 h-4 mr-1"/> 清空</button>
            <button onClick={saveAnnotations} className="px-4 py-1.5 bg-indigo-600 text-white rounded shadow-sm text-sm font-medium flex items-center hover:bg-indigo-700"><Save className="w-4 h-4 mr-2"/> 保存标注</button>
          </div>
