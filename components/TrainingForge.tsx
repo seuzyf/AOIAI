@@ -19,21 +19,25 @@ import {
   CheckSquare,
   Square,
   CheckCircle,
-  Loader2
+  Loader2,
+  Lock // 新增 Lock 图标用于权限提示
 } from 'lucide-react';
 import JSZip from 'jszip';
-import { TerminalLog, Dataset, Sample } from '../types';
+import { TerminalLog, Dataset, Sample, UserInfo } from '../types'; // 引入 UserInfo 类型
 import { api } from '../api';
 
+// 接口增加 currentUser 参数
 interface TrainingForgeProps {
+  currentUser: UserInfo; 
   onNavigateToSampleHub: () => void;
 }
 
 const BASE_MODELS = {
   detection: [
-    { id: 'yolo11n', name: 'YOLO11-Industrial-N', desc: '极速轻量，适合边缘设备极致推理速度要求与常规缺陷', params: '2.6M' },
-    { id: 'yolo11s', name: 'YOLO11-Industrial-S', desc: '速度与精度兼顾，适合绝大多数工业表面缺陷的快速检测', params: '9.4M' },
-    { id: 'yolo11m', name: 'YOLO11-Industrial-M', desc: '高精度基座，适合复杂背景下的细微缺陷特征提取', params: '20.1M' }
+    { id: 'yolo11n', name: 'YOLO11-Industrial-N', desc: '极速轻量，适合边缘设备极致推理速度要求与常规缺陷', params: '5.4M' },
+    { id: 'yolo11m', name: 'YOLO11-Industrial-M', desc: '速度与精度兼顾，适合绝大多数工业表面缺陷的快速检测', params: '38.7M' },
+    { id: 'yolo11l', name: 'YOLO11-Industrial-L', desc: '高精度基座，适合复杂背景下的细微缺陷特征提取', params: '49.0M' },
+    { id: 'yolo11x', name: 'YOLO11-Industrial-X', desc: '最大参数量，适合高精度定位识别场景，性能需求较大', params: '109M' }
   ],
   classification: [
     { id: 'resnet50', name: 'ResNet50-AOI', desc: '工业二分类经典架构，稳定可靠的良品判定基座', params: '23.5M' },
@@ -46,7 +50,7 @@ const BASE_MODELS = {
   ]
 };
 
-export const TrainingForge: React.FC<TrainingForgeProps> = ({ onNavigateToSampleHub }) => {
+export const TrainingForge: React.FC<TrainingForgeProps> = ({ currentUser, onNavigateToSampleHub }) => {
   const [currentStep, setCurrentStep] = useState(0);
   const [engineerMode, setEngineerMode] = useState(false);
   const [logs, setLogs] = useState<TerminalLog[]>([]);
@@ -114,10 +118,11 @@ export const TrainingForge: React.FC<TrainingForgeProps> = ({ onNavigateToSample
   useEffect(() => {
     if (isTraining && !isFinished) {
       const dynamicLogs = [
+        `> [系统] 当前操作用户: ${currentUser.name} (${currentUser.roleName})`, // 新增日志反馈
         `> [系统] 正在初始化工作空间...`,
         `> [配置] 场景设定为: ${scenario}, 加载基座权重: ${baseModel}...`,
         `> [算力] 目标硬件预设: ${hardware}, 自动调整并发策略...`,
-        `> [超参] Epochs: ${epochs}, 图像分辨率: ${imgsz}px`,
+        `> [超参] Epochs: ${epochs}, 图像分辨率: ${imgsz}px, 进阶模式: ${engineerMode ? '开启' : '关闭'}`,
         `> [系统] 正在提取离线训练引擎依赖环境...`,
         `> [数据] 校验与拉取选中数据集的全部真实样本图片与标注...`,
         `> [数据] 动态调整相对坐标比例，转化为YOLO全量化标准格式...`,
@@ -204,7 +209,6 @@ export const TrainingForge: React.FC<TrainingForgeProps> = ({ onNavigateToSample
       });
       const tagsArray = Array.from(selectedTags);
       
-      // 使用更兼容的 YOLO Yaml 数组写法
       const classesConfig = tagsArray.map(tag => `  - "${tag}"`).join('\n');
 
       const datasetYamlContent = `train: images/train
@@ -263,7 +267,6 @@ perspective: ${augParams.perspective}
           try {
               if (!sample.thumbnailUrl) continue;
               
-              // 修复跨域和路径缺失问题，强制指向后端的实际图片服务地址
               const imgUrl = sample.thumbnailUrl.startsWith('http') 
                   ? sample.thumbnailUrl 
                   : `http://localhost:3001${sample.thumbnailUrl}`;
@@ -273,7 +276,6 @@ perspective: ${augParams.perspective}
               
               const imgBlob = await imgRes.blob();
               
-              // 动态解析图片实际宽高
               const img = new Image();
               const imgUrlObj = URL.createObjectURL(imgBlob);
               const imgDimensions = await new Promise<{width: number, height: number}>((resolve) => {
@@ -283,18 +285,15 @@ perspective: ${augParams.perspective}
               });
               URL.revokeObjectURL(imgUrlObj);
 
-              // 过滤掉可能打断文件路径的非法字符
               const extMatch = sample.filename.match(/\.([^.]+)$/);
               const ext = extMatch ? extMatch[1] : 'jpg';
               const baseName = sample.filename.replace(/\.[^.]+$/, '');
               const sanitizedBaseName = baseName.replace(/[^a-zA-Z0-9_\-]/g, '_');
               const finalName = `${sanitizedBaseName}_${sample.id.slice(-6)}`;
               
-              // 写入图片
               zip.file(`datasets/images/${folder}/${finalName}.${ext}`, imgBlob);
               successImageCount++;
               
-              // 拼装符合 YOLO 格式的 TXT 标注文件 (Class CenterX CenterY W H) - 全归一化
               let labelContent = '';
               if (sample.annotations && sample.annotations.length > 0) {
                   const lines = sample.annotations.map(ann => {
@@ -316,7 +315,6 @@ perspective: ${augParams.perspective}
                   labelContent = lines.join('\n');
               }
               
-              // 写入 TXT 标签文件 (空文本也会生成，代表纯背景无缺陷的负样本)
               zip.file(`datasets/labels/${folder}/${finalName}.txt`, labelContent + (labelContent ? '\n' : ''));
           } catch (err) {
               console.error(`处理样本图片失败: ${sample.id}`, err);
@@ -330,6 +328,7 @@ perspective: ${augParams.perspective}
       // === 第 6 步：生成说明和外部依赖拉取 ===
       const readmeContent = `=== AOI 离线自动化训练包 ===
 
+打包人员: ${currentUser.name} (${currentUser.id}) - ${currentUser.roleName}
 环境要求: 无需安装任何 Python、CUDA 或框架环境。支持纯内网物理机运行。
 
 【使用步骤】
@@ -427,7 +426,7 @@ perspective: ${augParams.perspective}
                         </div>
                         <p className="text-xs text-slate-500 mb-4 flex-1 pr-6">{model.desc}</p>
                         <div className="text-[10px] font-mono bg-white border border-slate-200 text-slate-500 w-fit px-2 py-1 rounded shadow-sm">
-                          模型参数量: <span className="font-bold text-slate-700">{model.params}</span>
+                          模型大小: <span className="font-bold text-slate-700">{model.params}</span>
                         </div>
                       </div>
                    ))}
@@ -513,12 +512,21 @@ perspective: ${augParams.perspective}
           <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
              <div className="flex justify-between items-center">
                <h2 className="text-xl font-semibold text-slate-800">严谨配置训练参数</h2>
+               
+               {/* 修改：权限判断，禁用技师角色的进阶模式 */}
                <div className="flex items-center gap-2">
                  <span className={`text-sm font-medium ${engineerMode ? 'text-indigo-600' : 'text-slate-500'}`}>工程师进阶模式</span>
-                 <button onClick={() => setEngineerMode(!engineerMode)} className={`w-11 h-6 flex items-center rounded-full p-1 transition-colors duration-200 ${engineerMode ? 'bg-indigo-600' : 'bg-slate-300'}`}>
-                   <div className={`bg-white w-4 h-4 rounded-full shadow-md transform transition-transform duration-200 ${engineerMode ? 'translate-x-5' : 'translate-x-0'}`}></div>
-                 </button>
+                 {currentUser.role !== 'technician' ? (
+                   <button onClick={() => setEngineerMode(!engineerMode)} className={`w-11 h-6 flex items-center rounded-full p-1 transition-colors duration-200 ${engineerMode ? 'bg-indigo-600' : 'bg-slate-300'}`}>
+                     <div className={`bg-white w-4 h-4 rounded-full shadow-md transform transition-transform duration-200 ${engineerMode ? 'translate-x-5' : 'translate-x-0'}`}></div>
+                   </button>
+                 ) : (
+                   <div className="flex items-center gap-1.5 text-xs text-red-500 bg-red-50 border border-red-100 px-2 py-1 rounded-md shadow-sm ml-2">
+                     <Lock className="w-3.5 h-3.5" /> 仅工程师解锁
+                   </div>
+                 )}
                </div>
+
              </div>
 
              <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm space-y-8">
