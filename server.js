@@ -309,13 +309,19 @@ app.post('/api/samples/upload-zip', uploadImage.single('file'), async (req, res)
 });
 
 app.put('/api/samples/:id/annotate', (req, res) => {
-  const { annotations } = req.body;
+  const { annotations, annotator } = req.body; // 提取 annotator
   const samples = readDB('samples.json');
   const sampleIndex = samples.findIndex(s => s.id === req.params.id);
   if (sampleIndex > -1) {
     samples[sampleIndex].annotations = annotations;
     samples[sampleIndex].defects = [...new Set(annotations.map(a => a.label))];
     samples[sampleIndex].status = annotations.length > 0 ? 'LABELED' : 'UNLABELED';
+    
+    // 如果有传入标注人信息，则更新
+    if (annotator) {
+      samples[sampleIndex].lastAnnotator = annotator;
+    }
+    
     writeDB('samples.json', samples);
     res.json(samples[sampleIndex]);
   } else res.status(404).json({ error: 'Sample not found' });
