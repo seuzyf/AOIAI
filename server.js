@@ -36,6 +36,12 @@ const writeDB = (filename, data) => {
 if (!fs.existsSync(path.join(DB_DIR, 'samples.json'))) writeDB('samples.json', []);
 if (!fs.existsSync(path.join(DB_DIR, 'models.json'))) writeDB('models.json', []);
 if (!fs.existsSync(path.join(DB_DIR, 'datasets.json'))) writeDB('datasets.json', []);
+// 初始化本地物理数据库：用户权限配置表
+if (!fs.existsSync(path.join(DB_DIR, 'users.json'))) {
+  writeDB('users.json', [
+    { name: '周扬帆', id: '00588771', role: 'admin', roleName: '管理员', color: 'bg-red-100 text-red-700 border-red-200' }
+  ]);
+}
 if (!fs.existsSync(path.join(DB_DIR, 'classes.json'))) {
   writeDB('classes.json', [
     { id: 101, name: '划痕 (Scratch)', code: 'SCRATCH', color: '#ef4444' },
@@ -107,7 +113,6 @@ const extractArchive = async (archivePath, destDir) => {
   });
 };
 
-// 提取共用的模型解析逻辑
 const parseModelArchive = async (archivePath, targetModel) => {
   const tempExtractedDir = path.join(TEMP_DIR, `model-${Date.now()}`);
   fs.mkdirSync(tempExtractedDir, { recursive: true });
@@ -186,6 +191,49 @@ const parseModelArchive = async (archivePath, targetModel) => {
     }
   }
 };
+
+// --- 用户与权限 API 路由 ---
+app.post('/api/users/login', (req, res) => {
+  const { name, id } = req.body;
+  const users = readDB('users.json');
+  let user = users.find(u => u.id === id);
+
+  if (user) {
+    if (user.name !== name) {
+      return res.status(400).json({ error: '该工号已被其他姓名注册，请检查工号是否输入正确。' });
+    }
+  } else {
+    // 首次注册，新建并默认分配工程师权限
+    user = {
+      name,
+      id,
+      role: 'engineer',
+      roleName: '工程师',
+      color: 'bg-blue-100 text-blue-700 border-blue-200'
+    };
+    users.push(user);
+    writeDB('users.json', users);
+  }
+  res.json(user);
+});
+
+app.get('/api/users', (req, res) => res.json(readDB('users.json')));
+
+app.put('/api/users/:id/role', (req, res) => {
+  const { role, roleName, color } = req.body;
+  const users = readDB('users.json');
+  const idx = users.findIndex(u => u.id === req.params.id);
+  
+  if (idx > -1) {
+    users[idx].role = role;
+    users[idx].roleName = roleName;
+    users[idx].color = color;
+    writeDB('users.json', users);
+    res.json(users[idx]);
+  } else {
+    res.status(404).json({ error: 'User not found' });
+  }
+});
 
 
 // API 路由
@@ -309,19 +357,14 @@ app.post('/api/samples/upload-zip', uploadImage.single('file'), async (req, res)
 });
 
 app.put('/api/samples/:id/annotate', (req, res) => {
-  const { annotations, annotator } = req.body; // 提取 annotator
+  const { annotations, annotator } = req.body; 
   const samples = readDB('samples.json');
   const sampleIndex = samples.findIndex(s => s.id === req.params.id);
   if (sampleIndex > -1) {
     samples[sampleIndex].annotations = annotations;
     samples[sampleIndex].defects = [...new Set(annotations.map(a => a.label))];
     samples[sampleIndex].status = annotations.length > 0 ? 'LABELED' : 'UNLABELED';
-    
-    // 如果有传入标注人信息，则更新
-    if (annotator) {
-      samples[sampleIndex].lastAnnotator = annotator;
-    }
-    
+    if (annotator) samples[sampleIndex].lastAnnotator = annotator;
     writeDB('samples.json', samples);
     res.json(samples[sampleIndex]);
   } else res.status(404).json({ error: 'Sample not found' });
@@ -379,7 +422,6 @@ app.post('/api/models/upload', uploadModel.single('file'), async (req, res) => {
   res.json(newModel);
 });
 
-// 修改模型信息
 app.put('/api/models/:id', (req, res) => {
   const { name, description } = req.body;
   const models = readDB('models.json');
@@ -395,7 +437,6 @@ app.put('/api/models/:id', (req, res) => {
   }
 });
 
-// 更新模型文件 (重新解析并版本+1)
 app.put('/api/models/:id/update-file', uploadModel.single('file'), async (req, res) => {
   const models = readDB('models.json');
   const idx = models.findIndex(m => m.id === req.params.id);
@@ -406,8 +447,6 @@ app.put('/api/models/:id/update-file', uploadModel.single('file'), async (req, r
   }
 
   let targetModel = models[idx];
-  
-  // 版本号递增逻辑 v1.0.0 -> v1.0.1
   let newVersion = targetModel.version;
   const match = newVersion.match(/v(\d+)\.(\d+)\.(\d+)/);
   if (match) {
@@ -440,7 +479,6 @@ app.put('/api/models/:id/update-file', uploadModel.single('file'), async (req, r
   res.json(targetModel);
 });
 
-// 删除模型
 app.delete('/api/models/:id', (req, res) => {
   let models = readDB('models.json');
   models = models.filter(m => m.id !== req.params.id);

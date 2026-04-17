@@ -20,13 +20,13 @@ import {
   Square,
   CheckCircle,
   Loader2,
-  Lock // 新增 Lock 图标用于权限提示
+  Lock,
+  Search
 } from 'lucide-react';
 import JSZip from 'jszip';
-import { TerminalLog, Dataset, Sample, UserInfo } from '../types'; // 引入 UserInfo 类型
+import { TerminalLog, Dataset, Sample, UserInfo } from '../types';
 import { api } from '../api';
 
-// 接口增加 currentUser 参数
 interface TrainingForgeProps {
   currentUser: UserInfo; 
   onNavigateToSampleHub: () => void;
@@ -64,6 +64,9 @@ export const TrainingForge: React.FC<TrainingForgeProps> = ({ currentUser, onNav
   const [hardware, setHardware] = useState<'gpu_high' | 'gpu_low' | 'cpu' | null>(null);
   const [datasets, setDatasets] = useState<Dataset[]>([]);
   const [selectedDatasetIds, setSelectedDatasetIds] = useState<Set<string>>(new Set());
+  
+  const [datasetSearchTerm, setDatasetSearchTerm] = useState('');
+  const [datasetShowOnlyMine, setDatasetShowOnlyMine] = useState(false);
   
   // Params State
   const [epochs, setEpochs] = useState<number>(300);
@@ -118,7 +121,7 @@ export const TrainingForge: React.FC<TrainingForgeProps> = ({ currentUser, onNav
   useEffect(() => {
     if (isTraining && !isFinished) {
       const dynamicLogs = [
-        `> [系统] 当前操作用户: ${currentUser.name} (${currentUser.roleName})`, // 新增日志反馈
+        `> [系统] 当前操作用户: ${currentUser.name} (${currentUser.roleName})`,
         `> [系统] 正在初始化工作空间...`,
         `> [配置] 场景设定为: ${scenario}, 加载基座权重: ${baseModel}...`,
         `> [算力] 目标硬件预设: ${hardware}, 自动调整并发策略...`,
@@ -161,7 +164,6 @@ export const TrainingForge: React.FC<TrainingForgeProps> = ({ currentUser, onNav
     try {
       const zip = new JSZip();
 
-      // === 第 1 步：优先处理数据聚合与验证逻辑 ===
       const allSamples = await api.getSamples();
       const selectedSampleIds = new Set<string>();
       datasets.filter(d => selectedDatasetIds.has(d.id)).forEach(d => {
@@ -177,13 +179,11 @@ export const TrainingForge: React.FC<TrainingForgeProps> = ({ currentUser, onNav
         return;
       }
 
-      // 样本随机打乱 (Fisher-Yates)
       for (let i = validSamples.length - 1; i > 0; i--) {
           const j = Math.floor(Math.random() * (i + 1));
           [validSamples[i], validSamples[j]] = [validSamples[j], validSamples[i]];
       }
 
-      // 计算并确保训练和验证集都不会为空 (否则 YOLO 会报 Error loading data from val)
       let trainCount = Math.floor(totalSamples * (trainRatio / 100));
       let valCount = Math.floor(totalSamples * (valRatio / 100));
       
@@ -202,7 +202,6 @@ export const TrainingForge: React.FC<TrainingForgeProps> = ({ currentUser, onNav
           return { sample, folder: 'test' };
       });
 
-      // === 第 2 步：收集标签并生成 dataset.yaml ===
       const selectedTags = new Set<string>();
       datasets.filter(d => selectedDatasetIds.has(d.id)).forEach(d => {
         d.tags.forEach(tag => selectedTags.add(tag));
@@ -211,49 +210,16 @@ export const TrainingForge: React.FC<TrainingForgeProps> = ({ currentUser, onNav
       
       const classesConfig = tagsArray.map(tag => `  - "${tag}"`).join('\n');
 
-      const datasetYamlContent = `train: images/train
-val: images/val
-${testCount > 0 ? 'test: images/test' : ''}
-
-# 类别定义
-names:
-${classesConfig || '  - "default_defect"'}
-`;
+      const datasetYamlContent = `train: images/train\nval: images/val\n${testCount > 0 ? 'test: images/test' : ''}\n\n# 类别定义\nnames:\n${classesConfig || '  - "default_defect"'}\n`;
       zip.file("dataset.yaml", datasetYamlContent);
 
-      // === 第 3 步：生成基础 args.yaml ===
       const taskType = scenario === 'detection' ? 'detect' : scenario === 'classification' ? 'classify' : 'segment';
       const batchSize = hardware === 'cpu' ? 4 : (hardware === 'gpu_high' ? 32 : 16);
       const deviceOpt = hardware === 'cpu' ? 'cpu' : '0';
 
-      const yamlContent = `# ==========================================
-# 华为AI检测训练平台 - 离线训练预设参数
-# ==========================================
-task: ${taskType}
-model: ${baseModel}.pt
-data: dataset.yaml
-epochs: ${epochs}
-imgsz: ${imgsz}
-device: '${deviceOpt}'
-batch: ${batchSize}
-workers: 8
-
-# --- 超参数 (Hyperparameters) ---
-lr0: ${hyperparams.lr0}
-lrf: ${hyperparams.lrf}
-momentum: ${hyperparams.momentum}
-weight_decay: ${hyperparams.weight_decay}
-warmup_epochs: ${hyperparams.warmup_epochs}
-
-# --- 数据增强 (Augmentations) ---
-mosaic: ${augParams.mosaic}
-mixup: ${augParams.mixup}
-degrees: ${augParams.degrees}
-perspective: ${augParams.perspective}
-`;
+      const yamlContent = `# ==========================================\n# 华为AI检测训练平台 - 离线训练预设参数\n# ==========================================\ntask: ${taskType}\nmodel: ${baseModel}.pt\ndata: dataset.yaml\nepochs: ${epochs}\nimgsz: ${imgsz}\ndevice: '${deviceOpt}'\nbatch: ${batchSize}\nworkers: 8\n\n# --- 超参数 (Hyperparameters) ---\nlr0: ${hyperparams.lr0}\nlrf: ${hyperparams.lrf}\nmomentum: ${hyperparams.momentum}\nweight_decay: ${hyperparams.weight_decay}\nwarmup_epochs: ${hyperparams.warmup_epochs}\n\n# --- 数据增强 (Augmentations) ---\nmosaic: ${augParams.mosaic}\nmixup: ${augParams.mixup}\ndegrees: ${augParams.degrees}\nperspective: ${augParams.perspective}\n`;
       zip.file("args.yaml", yamlContent);
 
-      // === 第 4 步：构建空目录结构 ===
       ['train', 'val', 'test'].forEach(dir => {
           if (dir === 'test' && testCount === 0) return;
           zip.folder("datasets")?.folder("images")?.folder(dir);
@@ -261,7 +227,6 @@ perspective: ${augParams.perspective}
       });
       zip.folder("runs");
 
-      // === 第 5 步：并发拉取真实图片并转化为YOLO文本写入 ===
       let successImageCount = 0;
       for (const { sample, folder } of splits) {
           try {
@@ -325,20 +290,7 @@ perspective: ${augParams.perspective}
           alert("警告：后端接口拉取图片失败，导致 ZIP 包里没有存放任何图像。请确保 Node.js 服务 (3001) 已启动！");
       }
 
-      // === 第 6 步：生成说明和外部依赖拉取 ===
-      const readmeContent = `=== AOI 离线自动化训练包 ===
-
-打包人员: ${currentUser.name} (${currentUser.id}) - ${currentUser.roleName}
-环境要求: 无需安装任何 Python、CUDA 或框架环境。支持纯内网物理机运行。
-
-【使用步骤】
-1. 数据已就绪: 所选数据集的所有真实样本已按照 (Train: ${trainRatio}%, Val: ${valRatio}%, Test: ${testRatio}%) 比例完美封装。
-2. 一键启动: 直接双击运行同目录下的 [${baseModel}.exe]。
-3. 过程监控: 程序会自动弹出可视化监控面板，显示实时 Epoch 与进度条。
-4. 获取产物: 训练完成后，最优模型权重将保存在 runs/${taskType}/train/weights/best.pt。
-
-*高阶操作: 如需修改训练轮次或分辨率，请用记事本打开 args.yaml 进行修改并保存后，再运行 exe。
-`;
+      const readmeContent = `=== AOI 离线自动化训练包 ===\n\n打包人员: ${currentUser.name} (${currentUser.id}) - ${currentUser.roleName}\n环境要求: 无需安装任何 Python、CUDA 或框架环境。支持纯内网物理机运行。\n\n【使用步骤】\n1. 数据已就绪: 所选数据集的所有真实样本已按照 (Train: ${trainRatio}%, Val: ${valRatio}%, Test: ${testRatio}%) 比例完美封装。\n2. 一键启动: 直接双击运行同目录下的 [${baseModel}.exe]。\n3. 过程监控: 程序会自动弹出可视化监控面板，显示实时 Epoch 与进度条。\n4. 获取产物: 训练完成后，最优模型权重将保存在 runs/${taskType}/train/weights/best.pt。\n\n*高阶操作: 如需修改训练轮次或分辨率，请用记事本打开 args.yaml 进行修改并保存后，再运行 exe。\n`;
       zip.file("使用说明(必读).txt", readmeContent);
 
       const modelBasePath = `/model/${scenario}`;
@@ -355,7 +307,6 @@ perspective: ${augParams.perspective}
         else zip.file(`${baseModel}_Placeholder.txt`, `开发环境提示：无法加载 ${baseModel}.exe`);
       } catch (e) {}
 
-      // === 最终触发下载 ===
       const blob = await zip.generateAsync({ type: "blob", compression: "STORE" });
       const dateStr = new Date().toISOString().split('T')[0];
       const url = URL.createObjectURL(blob);
@@ -470,6 +421,32 @@ perspective: ${augParams.perspective}
         );
 
       case 2:
+        // 在这里进行数据集挂载的筛选过滤（支持空格多条件AND检索）
+        const filteredDatasets = datasets.filter(ds => {
+          const isMine = ds.creator.includes(currentUser.name) || ds.creator.includes(currentUser.id);
+          
+          if (currentUser.role !== 'admin' && !isMine) return false;
+          if (currentUser.role === 'admin' && datasetShowOnlyMine && !isMine) return false;
+      
+          if (datasetSearchTerm) {
+            const terms = datasetSearchTerm.toLowerCase().split(/\s+/).filter(Boolean);
+            
+            const isMatch = terms.every(term => {
+              const matchName = ds.name.toLowerCase().includes(term);
+              const matchTags = ds.tags.some(t => t.toLowerCase().includes(term));
+              const matchDevices = ds.devices?.some(d => d.toLowerCase().includes(term));
+              const matchLines = ds.lines?.some(l => l.toLowerCase().includes(term));
+              
+              return matchName || matchTags || matchDevices || matchLines;
+            });
+
+            if (!isMatch) {
+              return false;
+            }
+          }
+          return true;
+        });
+
         return (
           <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500 flex flex-col h-full">
              <div className="flex justify-between items-center">
@@ -481,8 +458,32 @@ perspective: ${augParams.perspective}
                </button>
              </div>
              
-             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 max-h-[60vh] overflow-y-auto pr-2 pb-4">
-               {datasets.map(ds => (
+             <div className="flex flex-col sm:flex-row items-center gap-3 bg-slate-50 p-3 rounded-xl border border-slate-200">
+               <div className="relative flex-1 w-full">
+                  <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                  <input
+                    type="text"
+                    placeholder="按名称、标签、产线、设备快速筛选 (支持空格分隔多条件)..."
+                    className="w-full pl-9 pr-4 py-2 bg-white border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 outline-none transition-all"
+                    value={datasetSearchTerm}
+                    onChange={(e) => setDatasetSearchTerm(e.target.value)}
+                  />
+               </div>
+               {currentUser.role === 'admin' && (
+                 <label className="flex items-center gap-2 text-sm text-slate-600 cursor-pointer bg-white px-4 py-2 border border-slate-200 rounded-lg hover:bg-slate-50 transition-colors">
+                   <input
+                     type="checkbox"
+                     checked={datasetShowOnlyMine}
+                     onChange={(e) => setDatasetShowOnlyMine(e.target.checked)}
+                     className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 w-4 h-4 cursor-pointer"
+                   />
+                   <span className="font-medium">只看我创建的</span>
+                 </label>
+               )}
+             </div>
+
+             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 max-h-[50vh] overflow-y-auto pr-2 pb-4">
+               {filteredDatasets.map(ds => (
                  <div key={ds.id} onClick={() => toggleDataset(ds.id)} className={`relative bg-white rounded-xl border-2 p-5 cursor-pointer transition-all ${selectedDatasetIds.has(ds.id) ? 'border-indigo-600 bg-indigo-50/30' : 'border-slate-200 hover:border-indigo-300'}`}>
                     <div className="absolute top-4 right-4 text-slate-400">
                       {selectedDatasetIds.has(ds.id) ? <CheckSquare className="w-5 h-5 text-indigo-600"/> : <Square className="w-5 h-5"/>}
@@ -502,7 +503,11 @@ perspective: ${augParams.perspective}
                     </div>
                  </div>
                ))}
-               {datasets.length === 0 && <div className="col-span-full py-10 text-center text-slate-400 bg-slate-50 border-2 border-dashed rounded-xl">暂无数据集，请先前往样本库固化数据集。</div>}
+               {filteredDatasets.length === 0 && (
+                 <div className="col-span-full py-10 text-center text-slate-400 bg-slate-50 border-2 border-dashed rounded-xl">
+                   {datasets.length === 0 ? '暂无数据集，请先前往样本库固化数据集。' : '没有匹配到符合筛选条件的数据集。'}
+                 </div>
+               )}
              </div>
           </div>
         );
@@ -513,7 +518,6 @@ perspective: ${augParams.perspective}
              <div className="flex justify-between items-center">
                <h2 className="text-xl font-semibold text-slate-800">严谨配置训练参数</h2>
                
-               {/* 修改：权限判断，禁用技师角色的进阶模式 */}
                <div className="flex items-center gap-2">
                  <span className={`text-sm font-medium ${engineerMode ? 'text-indigo-600' : 'text-slate-500'}`}>工程师进阶模式</span>
                  {currentUser.role !== 'technician' ? (

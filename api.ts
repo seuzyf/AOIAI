@@ -1,8 +1,28 @@
-import { Sample, GlobalClass, TerminalLog, Dataset, AIModel } from './types';
+import { Sample, GlobalClass, TerminalLog, Dataset, AIModel, UserInfo } from './types';
 
 const API_BASE = '/api';
 
 export const api = {
+  // --- 用户相关 API ---
+  login: async (name: string, id: string): Promise<UserInfo> => {
+    const res = await fetch(`${API_BASE}/users/login`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name, id })
+    });
+    if (!res.ok) {
+      const errorData = await res.json();
+      throw new Error(errorData.error || '登录失败');
+    }
+    return res.json();
+  },
+  getUsers: async (): Promise<UserInfo[]> => (await fetch(`${API_BASE}/users`)).json(),
+  updateUserRole: async (id: string, roleData: { role: string, roleName: string, color: string }): Promise<UserInfo> => {
+    const res = await fetch(`${API_BASE}/users/${id}/role`, {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(roleData)
+    });
+    return res.json();
+  },
+
+  // --- 业务相关 API ---
   getClasses: async (): Promise<GlobalClass[]> => (await fetch(`${API_BASE}/classes`)).json(),
   addClass: async (data: Omit<GlobalClass, 'id'>) => {
     const res = await fetch(`${API_BASE}/classes`, {

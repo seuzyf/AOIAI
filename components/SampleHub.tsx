@@ -1,16 +1,32 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Upload, FileUp, Search, Database, Loader2, Save, Trash2, Tag, ArrowLeft, Plus, Filter, CheckSquare, Square, FolderArchive, Image as ImageIcon, X, User, Undo } from 'lucide-react';
-import { Sample, Annotation, GlobalClass, UserInfo } from '../types';
+import { Upload, FileUp, Search, Database, Loader2, Save, Trash2, Tag, ArrowLeft, Plus, Filter, CheckSquare, Square, FolderArchive, Image as ImageIcon, X, User, Undo, AlertCircle } from 'lucide-react';
+import { Sample, Annotation, GlobalClass, UserInfo, Dataset } from '../types';
 import { DEVICE_BRANDS, PROCESS_TYPES, LINE_TYPES } from '../constants';
 import { api } from '../api';
 
+// 统一的对话框配置类型
+type DialogConfig = {
+  isOpen: boolean;
+  title: string;
+  message: React.ReactNode;
+  type: 'confirm' | 'alert';
+  confirmText?: string;
+  confirmStyle?: string;
+  onConfirm?: () => void;
+  onCancel?: () => void;
+};
+
 export const SampleHub: React.FC<{ currentUser: UserInfo }> = ({ currentUser }) => {
   const [samples, setSamples] = useState<Sample[]>([]);
+  const [datasets, setDatasets] = useState<Dataset[]>([]);
   const [classes, setClasses] = useState<GlobalClass[]>([]);
   const [viewMode, setViewMode] = useState<'list' | 'editor'>('list');
   const [selectedSample, setSelectedSample] = useState<Sample | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   
+  // 统一弹窗状态
+  const [dialog, setDialog] = useState<DialogConfig | null>(null);
+
   const [searchTerm, setSearchTerm] = useState('');
   const [showFilters, setShowFilters] = useState(false);
   const [filters, setFilters] = useState({ lines: [] as string[], processes: [] as string[], devices: [] as string[], defects: [] as string[] });
@@ -21,33 +37,128 @@ export const SampleHub: React.FC<{ currentUser: UserInfo }> = ({ currentUser }) 
 
   useEffect(() => { loadData(); loadClasses(); }, []);
 
-  const loadData = async () => { try { setSamples(await api.getSamples()); } catch (e) { console.error(e); } };
+  const loadData = async () => { 
+    try { 
+      setSamples(await api.getSamples()); 
+      setDatasets(await api.getDatasets());
+    } catch (e) { console.error(e); } 
+  };
+  
   const loadClasses = async () => { try { setClasses(await api.getClasses()); } catch (e) { console.error(e); } };
 
-  const handleDeleteClass = async (id: string, name: string) => {
-    if (!confirm(`确定要删除缺陷类型 [${name}] 吗？`)) return;
-    await api.deleteClass(id);
-    loadClasses();
+  const getAssociatedDatasets = (sampleId: string) => {
+    return datasets.filter(ds => ds.sampleIds?.includes(sampleId));
   };
 
-  const handleDelete = async (id: string) => {
-    if (!confirm('确认删除该样本吗？')) return;
+  const handleDeleteClass = (id: string, name: string) => {
+    setDialog({
+      isOpen: true,
+      type: 'confirm',
+      title: '删除缺陷类型',
+      message: `确定要永久删除缺陷类型 [${name}] 吗？`,
+      confirmText: '删除',
+      confirmStyle: 'bg-red-600 hover:bg-red-700',
+      onConfirm: async () => {
+        setDialog(null);
+        await api.deleteClass(id);
+        loadClasses();
+      },
+      onCancel: () => setDialog(null)
+    });
+  };
+
+  const handleDelete = (id: string) => {
+    const linkedDatasets = getAssociatedDatasets(id);
+    
+    if (linkedDatasets.length > 0) {
+      const dsNames = linkedDatasets.map(d => d.name).join(', ');
+      setDialog({
+        isOpen: true, type: 'confirm', title: '⚠️ 强制删除警告',
+        message: <p>该样本已关联到数据集 <span className="font-bold text-indigo-600">[{dsNames}]</span>。<br/>强制删除会导致对应数据集样本丢失及状态异常！确定要强制删除吗？</p>,
+        confirmText: '强制删除', confirmStyle: 'bg-red-600 hover:bg-red-700',
+        onConfirm: async () => {
+          setDialog(null);
+          await executeDelete(id);
+        },
+        onCancel: () => setDialog(null)
+      });
+    } else {
+      setDialog({
+        isOpen: true, type: 'confirm', title: '确认删除',
+        message: '确认永久删除该样本吗？此操作不可恢复。',
+        confirmText: '删除', confirmStyle: 'bg-red-600 hover:bg-red-700',
+        onConfirm: async () => {
+          setDialog(null);
+          await executeDelete(id);
+        },
+        onCancel: () => setDialog(null)
+      });
+    }
+  };
+
+  const executeDelete = async (id: string) => {
     await api.deleteSample(id);
     setSelectedIds(prev => { const next = new Set(prev); next.delete(id); return next; });
     loadData();
   };
 
-  const handleBatchDelete = async () => {
+  const handleBatchDelete = () => {
     if (selectedIds.size === 0) return;
-    if (!confirm(`确定要删除选中的 ${selectedIds.size} 项样本数据吗？此操作不可恢复。`)) return;
+    const linkedSamplesCount = Array.from(selectedIds).filter(id => getAssociatedDatasets(id).length > 0).length;
+    
+    if (linkedSamplesCount > 0) {
+      setDialog({
+        isOpen: true, type: 'confirm', title: '⚠️ 强制删除警告',
+        message: <p>选中的样本中有 <span className="font-bold text-red-500">{linkedSamplesCount}</span> 项已固化至数据集。<br/>强制删除会导致关联的数据集状态异常！确定要继续强制删除选定项吗？</p>,
+        confirmText: '强制批量删除', confirmStyle: 'bg-red-600 hover:bg-red-700',
+        onConfirm: async () => {
+          setDialog(null);
+          await executeBatchDelete();
+        },
+        onCancel: () => setDialog(null)
+      });
+    } else {
+      setDialog({
+        isOpen: true, type: 'confirm', title: '确认批量删除',
+        message: `确定要删除选中的 ${selectedIds.size} 项样本数据吗？此操作不可恢复。`,
+        confirmText: '删除', confirmStyle: 'bg-red-600 hover:bg-red-700',
+        onConfirm: async () => {
+          setDialog(null);
+          await executeBatchDelete();
+        },
+        onCancel: () => setDialog(null)
+      });
+    }
+  };
 
+  const executeBatchDelete = async () => {
     try {
       await Promise.all(Array.from(selectedIds).map(id => api.deleteSample(id)));
       setSelectedIds(new Set());
       loadData();
     } catch (e) {
-      console.error(e);
-      alert('批量删除时发生错误');
+      setDialog({ isOpen: true, type: 'alert', title: '错误', message: '批量删除时发生错误', onConfirm: () => setDialog(null) });
+    }
+  };
+
+  const handleAnnotate = (sample: Sample) => {
+    const linkedDatasets = getAssociatedDatasets(sample.id);
+    if (linkedDatasets.length > 0) {
+      const dsNames = linkedDatasets.map(d => d.name).join(', ');
+      setDialog({
+        isOpen: true, type: 'confirm', title: '⚠️ 标注修改提示',
+        message: <p>该样本已固化至数据集 <span className="font-bold text-indigo-600">[{dsNames}]</span> 中。<br/>修改标注可能会直接影响该数据集后续模型训练的效果，确定要继续修改吗？</p>,
+        confirmText: '继续修改', confirmStyle: 'bg-indigo-600 hover:bg-indigo-700',
+        onConfirm: () => {
+          setDialog(null);
+          setSelectedSample(sample); 
+          setViewMode('editor');
+        },
+        onCancel: () => setDialog(null)
+      });
+    } else {
+      setSelectedSample(sample); 
+      setViewMode('editor');
     }
   };
 
@@ -238,7 +349,7 @@ export const SampleHub: React.FC<{ currentUser: UserInfo }> = ({ currentUser }) 
                   </td>
                   <td className="px-6 py-3">
                     <div className="flex items-center gap-2">
-                      <button onClick={() => { setSelectedSample(sample); setViewMode('editor'); }} className="text-indigo-600 hover:text-indigo-800 font-medium px-3 py-1 bg-indigo-50 rounded text-xs">标注</button>
+                      <button onClick={() => handleAnnotate(sample)} className="text-indigo-600 hover:text-indigo-800 font-medium px-3 py-1 bg-indigo-50 rounded text-xs">标注</button>
                       {currentUser.role !== 'technician' && (
                         <button onClick={() => handleDelete(sample.id)} className="text-red-500 hover:text-red-700 hover:bg-red-50 p-1.5 rounded"><Trash2 className="w-4 h-4" /></button>
                       )}
@@ -251,50 +362,84 @@ export const SampleHub: React.FC<{ currentUser: UserInfo }> = ({ currentUser }) 
         </div>
       </div>
 
+      {/* 子组件模块 */}
       {uploadMode !== 'none' && <UploadModal mode={uploadMode} onClose={() => setUploadMode('none')} onRefresh={loadData} />}
-      {datasetModalOpen && <DatasetModal currentUser={currentUser} selectedIds={Array.from(selectedIds)} onClose={() => setDatasetModalOpen(false)} onSuccess={() => { setDatasetModalOpen(false); setSelectedIds(new Set()); alert('数据集制作成功！'); }} />}
+      {datasetModalOpen && <DatasetModal currentUser={currentUser} selectedIds={Array.from(selectedIds)} onClose={() => setDatasetModalOpen(false)} onSuccess={() => { 
+        setDatasetModalOpen(false); 
+        setSelectedIds(new Set()); 
+        loadData(); 
+        setDialog({ isOpen: true, type: 'alert', title: '成功', message: '数据集固化打包成功！', onConfirm: () => setDialog(null) }); 
+      }} />}
       {addClassModalOpen && <AddClassModal onClose={() => setAddClassModalOpen(false)} onSuccess={loadClasses} />}
+      
+      {/* 统一自定义弹窗 */}
+      <UnifiedDialog config={dialog} />
     </div>
   );
 };
+
+// --- 全局通用弹窗组件 ---
+const UnifiedDialog = ({ config }: { config: DialogConfig | null }) => {
+  if (!config || !config.isOpen) return null;
+  return (
+    <div className="fixed inset-0 bg-black/40 z-[100] flex items-center justify-center p-4 backdrop-blur-sm animate-in fade-in duration-200">
+      <div className="bg-white rounded-xl shadow-2xl w-full max-w-sm p-6 border-t-4 border-indigo-600 animate-in zoom-in-95 duration-200">
+        <h3 className={`text-lg font-bold mb-3 flex items-center gap-2 ${config.title.includes('⚠️') ? 'text-amber-600' : 'text-slate-800'}`}>
+           {config.title.includes('⚠️') ? <AlertCircle className="w-5 h-5"/> : null} {config.title}
+        </h3>
+        <div className="text-sm text-slate-600 mb-6 leading-relaxed">{config.message}</div>
+        <div className="flex justify-end gap-3 mt-4">
+           {config.type === 'confirm' && (
+             <button onClick={config.onCancel} className="px-4 py-2 text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-lg text-sm font-medium transition-colors">取消</button>
+           )}
+           <button onClick={config.onConfirm} className={`px-4 py-2 text-white rounded-lg text-sm font-medium transition-colors shadow-sm ${config.confirmStyle || 'bg-indigo-600 hover:bg-indigo-700'}`}>
+             {config.confirmText || '确定'}
+           </button>
+        </div>
+      </div>
+    </div>
+  )
+}
 
 const AddClassModal = ({ onClose, onSuccess }: { onClose: () => void, onSuccess: () => void }) => {
   const [zhName, setZhName] = useState('');
   const [enCode, setEnCode] = useState('');
   const [loading, setLoading] = useState(false);
+  const [errorMsg, setErrorMsg] = useState('');
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setLoading(true);
+    setLoading(true); setErrorMsg('');
     try {
       const color = `#${Math.floor(Math.random()*16777215).toString(16).padStart(6, '0')}`;
       const fullName = `${zhName} (${enCode})`;
       await api.addClass({ name: fullName, code: enCode.toUpperCase(), color });
       onSuccess();
       onClose();
-    } catch(err) { alert('添加失败'); } finally { setLoading(false); }
+    } catch(err) { setErrorMsg('添加失败，请重试'); } finally { setLoading(false); }
   };
 
   return (
-    <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
-       <div className="bg-white rounded-xl shadow-xl w-full max-w-sm p-6 border-t-4 border-indigo-600 animate-in zoom-in-95 duration-200">
+    <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 backdrop-blur-sm animate-in fade-in">
+       <div className="bg-white rounded-xl shadow-xl w-full max-w-sm p-6 border-t-4 border-indigo-600 animate-in zoom-in-95">
          <div className="flex justify-between items-center mb-4">
            <h3 className="text-lg font-bold text-slate-900">新增缺陷类型</h3>
            <button onClick={onClose} className="text-slate-400 hover:text-slate-600"><X className="w-5 h-5" /></button>
          </div>
+         {errorMsg && <div className="mb-4 text-xs text-red-600 bg-red-50 p-2 rounded border border-red-100">{errorMsg}</div>}
          <form onSubmit={handleSubmit} className="space-y-4">
            <div>
              <label className="block text-xs font-bold text-slate-700 mb-1">缺陷中文名</label>
-             <input required placeholder="例如: 极性错误" className="w-full border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 outline-none" value={zhName} onChange={e => setZhName(e.target.value)} />
+             <input required placeholder="例如: 极性错误" className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 outline-none" value={zhName} onChange={e => setZhName(e.target.value)} />
            </div>
            <div>
              <label className="block text-xs font-bold text-slate-700 mb-1">英文代号 (Code)</label>
-             <input required placeholder="例如: POLARITY" className="w-full border rounded-lg px-3 py-2 text-sm uppercase focus:ring-2 focus:ring-indigo-500 outline-none font-mono" value={enCode} onChange={e => setEnCode(e.target.value)} />
+             <input required placeholder="例如: POLARITY" className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm uppercase focus:ring-2 focus:ring-indigo-500 outline-none font-mono" value={enCode} onChange={e => setEnCode(e.target.value)} />
              <p className="text-[10px] text-slate-500 mt-1">用于代码和模型训练时的标签映射，建议全大写。</p>
            </div>
            <div className="flex justify-end gap-3 mt-6">
-             <button type="button" onClick={onClose} className="px-4 py-2 text-slate-600 hover:bg-slate-100 rounded text-sm">取消</button>
-             <button type="submit" disabled={loading} className="px-4 py-2 bg-indigo-600 text-white hover:bg-indigo-700 rounded text-sm font-medium">{loading ? '保存中...' : '保存分类'}</button>
+             <button type="button" onClick={onClose} className="px-4 py-2 text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-lg text-sm font-medium">取消</button>
+             <button type="submit" disabled={loading} className="px-4 py-2 bg-indigo-600 text-white hover:bg-indigo-700 rounded-lg shadow-sm text-sm font-medium">{loading ? '保存中...' : '保存分类'}</button>
            </div>
          </form>
        </div>
@@ -304,65 +449,65 @@ const AddClassModal = ({ onClose, onSuccess }: { onClose: () => void, onSuccess:
 
 const UploadModal = ({ mode, onClose, onRefresh }: { mode: 'batch'|'zip', onClose: () => void, onRefresh: () => void }) => {
   const [loading, setLoading] = useState(false);
+  const [errorMsg, setErrorMsg] = useState('');
   const [meta, setMeta] = useState({ device: DEVICE_BRANDS[0], process: PROCESS_TYPES[0], line: LINE_TYPES[0] });
   const [files, setFiles] = useState<FileList | null>(null);
   
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!files || files.length === 0) return alert('请选择文件');
-    setLoading(true);
+    if (!files || files.length === 0) return setErrorMsg('请先选择要上传的文件');
+    setLoading(true); setErrorMsg('');
     try {
       if (mode === 'batch') await api.uploadBatch(files, meta);
       else await api.uploadZip(files[0], meta);
       onRefresh();
       onClose();
-    } catch (e) { alert('上传失败'); } finally { setLoading(false); }
+    } catch (e) { setErrorMsg('上传失败，请检查网络或文件格式'); } finally { setLoading(false); }
   };
 
   return (
-    <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
-      <div className="bg-white rounded-xl shadow-xl w-full max-w-md p-6">
-        <h3 className="text-lg font-bold text-slate-900 mb-4">{mode === 'batch' ? '批量上传本地图片' : '导入 YOLO ZIP'}</h3>
+    <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 backdrop-blur-sm animate-in fade-in">
+      <div className="bg-white rounded-xl shadow-xl w-full max-w-md p-6 border-t-4 border-indigo-600 animate-in zoom-in-95">
+        <div className="flex justify-between items-center mb-4">
+           <h3 className="text-lg font-bold text-slate-900">{mode === 'batch' ? '批量上传本地图片' : '导入 YOLO ZIP'}</h3>
+           <button onClick={onClose} className="text-slate-400 hover:text-slate-600"><X className="w-5 h-5" /></button>
+        </div>
+        {errorMsg && <div className="mb-4 text-xs text-red-600 bg-red-50 p-2 rounded border border-red-100">{errorMsg}</div>}
         <form onSubmit={handleSubmit} className="space-y-4">
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <label className="block text-xs font-bold text-slate-500 mb-1">产品线 (LineType)</label>
-              <select className="w-full border rounded-lg px-3 py-2 text-sm" value={meta.line} onChange={e=>setMeta({...meta, line: e.target.value})}>
+              <label className="block text-xs font-bold text-slate-700 mb-1">产品线 (LineType)</label>
+              <select className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 outline-none" value={meta.line} onChange={e=>setMeta({...meta, line: e.target.value})}>
                 {LINE_TYPES.map(o => <option key={o} value={o}>{o}</option>)}
               </select>
             </div>
             <div>
-              <label className="block text-xs font-bold text-slate-500 mb-1">工序 (ProcessType)</label>
-              <select className="w-full border rounded-lg px-3 py-2 text-sm" value={meta.process} onChange={e=>setMeta({...meta, process: e.target.value})}>
+              <label className="block text-xs font-bold text-slate-700 mb-1">工序 (ProcessType)</label>
+              <select className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 outline-none" value={meta.process} onChange={e=>setMeta({...meta, process: e.target.value})}>
                 {PROCESS_TYPES.map(o => <option key={o} value={o}>{o}</option>)}
               </select>
             </div>
           </div>
           <div>
-            <label className="block text-xs font-bold text-slate-500 mb-1">设备类型 (DeviceBrand)</label>
-            <select className="w-full border rounded-lg px-3 py-2 text-sm" value={meta.device} onChange={e=>setMeta({...meta, device: e.target.value})}>
+            <label className="block text-xs font-bold text-slate-700 mb-1">设备类型 (DeviceBrand)</label>
+            <select className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 outline-none" value={meta.device} onChange={e=>setMeta({...meta, device: e.target.value})}>
               {DEVICE_BRANDS.map(o => <option key={o} value={o}>{o}</option>)}
             </select>
           </div>
           <div>
-            <label className="block text-xs font-bold text-slate-500 mb-1">选择文件</label>
+            <label className="block text-xs font-bold text-slate-700 mb-1">选择文件</label>
             <input 
               type="file" 
-              required 
               multiple={mode === 'batch'} 
               accept={mode === 'zip' ? '.zip,.rar,.7z' : 'image/*'} 
-              className="w-full border rounded-lg px-3 py-2 text-sm" 
+              className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 outline-none" 
               onChange={e => setFiles(e.target.files)} 
             />
-            {mode === 'zip' && (
-              <p className="text-[10px] text-slate-400 mt-1">
-                支持上传 .zip, .rar, .7z 格式的压缩包
-              </p>
-            )}
+            {mode === 'zip' && <p className="text-[10px] text-slate-400 mt-1">支持上传 .zip, .rar, .7z 格式的压缩包</p>}
           </div>
           <div className="flex justify-end gap-3 mt-6">
-            <button type="button" onClick={onClose} className="px-4 py-2 text-slate-600 hover:bg-slate-100 rounded text-sm">取消</button>
-            <button type="submit" disabled={loading} className="px-4 py-2 bg-indigo-600 text-white hover:bg-indigo-700 rounded text-sm flex items-center">
+            <button type="button" onClick={onClose} className="px-4 py-2 text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-lg text-sm font-medium">取消</button>
+            <button type="submit" disabled={loading} className="px-4 py-2 bg-indigo-600 text-white hover:bg-indigo-700 rounded-lg shadow-sm text-sm font-medium flex items-center">
               {loading ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : null} {loading ? '处理中...' : '确认上传'}
             </button>
           </div>
@@ -375,10 +520,11 @@ const UploadModal = ({ mode, onClose, onRefresh }: { mode: 'batch'|'zip', onClos
 const DatasetModal = ({ selectedIds, onClose, onSuccess, currentUser }: { selectedIds: string[], onClose: () => void, onSuccess: () => void, currentUser: UserInfo }) => {
   const [formData, setFormData] = useState({ name: '', version: 'v1.0.0', date: new Date().toISOString().split('T')[0] });
   const [loading, setLoading] = useState(false);
+  const [errorMsg, setErrorMsg] = useState('');
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setLoading(true);
+    setLoading(true); setErrorMsg('');
     try {
       await api.createDataset({ 
         ...formData, 
@@ -386,21 +532,22 @@ const DatasetModal = ({ selectedIds, onClose, onSuccess, currentUser }: { select
         creator: `${currentUser.name} ${currentUser.id}`
       });
       onSuccess();
-    } catch(e) { alert('创建失败'); } finally { setLoading(false); }
+    } catch(e) { setErrorMsg('数据集创建失败'); } finally { setLoading(false); }
   }
 
   return (
-    <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-      <div className="bg-white rounded-xl shadow-xl w-full max-w-md p-6 border-t-4 border-indigo-600">
+    <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 backdrop-blur-sm animate-in fade-in">
+      <div className="bg-white rounded-xl shadow-xl w-full max-w-md p-6 border-t-4 border-indigo-600 animate-in zoom-in-95">
         <h3 className="text-lg font-bold text-slate-900 mb-2">制作数据集</h3>
-        <p className="text-sm text-slate-500 mb-4">将当前选中的 {selectedIds.length} 张样本打包固化至数据库。</p>
+        <p className="text-sm text-slate-500 mb-4">将当前选中的 <b className="text-indigo-600">{selectedIds.length}</b> 张样本打包固化至数据库。</p>
+        {errorMsg && <div className="mb-4 text-xs text-red-600 bg-red-50 p-2 rounded border border-red-100">{errorMsg}</div>}
         <form onSubmit={handleSubmit} className="space-y-4">
-          <div><label className="block text-xs font-bold text-slate-700 mb-1">数据集命名</label><input required className="w-full border rounded-lg px-3 py-2 text-sm" value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} /></div>
-          <div><label className="block text-xs font-bold text-slate-700 mb-1">版本号</label><input required className="w-full border rounded-lg px-3 py-2 text-sm" value={formData.version} onChange={e => setFormData({...formData, version: e.target.value})} /></div>
-          <div><label className="block text-xs font-bold text-slate-700 mb-1">创建日期</label><input type="date" required className="w-full border rounded-lg px-3 py-2 text-sm" value={formData.date} onChange={e => setFormData({...formData, date: e.target.value})} /></div>
+          <div><label className="block text-xs font-bold text-slate-700 mb-1">数据集命名</label><input required className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 outline-none" value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} /></div>
+          <div><label className="block text-xs font-bold text-slate-700 mb-1">版本号</label><input required className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 outline-none" value={formData.version} onChange={e => setFormData({...formData, version: e.target.value})} /></div>
+          <div><label className="block text-xs font-bold text-slate-700 mb-1">创建日期</label><input type="date" required className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 outline-none" value={formData.date} onChange={e => setFormData({...formData, date: e.target.value})} /></div>
           <div className="flex justify-end gap-3 mt-6">
-            <button type="button" onClick={onClose} className="px-4 py-2 text-slate-600 hover:bg-slate-100 rounded text-sm">取消</button>
-            <button type="submit" disabled={loading} className="px-4 py-2 bg-indigo-600 text-white hover:bg-indigo-700 rounded text-sm flex items-center">确认生成</button>
+            <button type="button" onClick={onClose} className="px-4 py-2 text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-lg text-sm font-medium">取消</button>
+            <button type="submit" disabled={loading} className="px-4 py-2 bg-indigo-600 text-white hover:bg-indigo-700 rounded-lg shadow-sm text-sm font-medium flex items-center">{loading ? '生成中...' : '确认生成'}</button>
           </div>
         </form>
       </div>
@@ -506,7 +653,6 @@ const RealAnnotationEditor: React.FC<{ sample: Sample, globalClasses: GlobalClas
     }
   };
 
-  // 撤销上一步操作
   const handleUndo = () => {
     setAnnotations(prev => prev.slice(0, -1));
   };
@@ -517,42 +663,42 @@ const RealAnnotationEditor: React.FC<{ sample: Sample, globalClasses: GlobalClas
   };
 
   return (
-    <div className="flex flex-col h-full bg-slate-50 border border-slate-200 rounded-xl overflow-hidden">
-      <div className="h-14 bg-white border-b border-slate-200 flex items-center justify-between px-4">
+    <div className="flex flex-col h-full bg-slate-50 border border-slate-200 rounded-xl overflow-hidden animate-in fade-in">
+      <div className="h-14 bg-white border-b border-slate-200 flex items-center justify-between px-4 shadow-sm z-10">
          <div className="flex items-center gap-4">
-           <button onClick={onBack} className="p-2 hover:bg-slate-100 rounded-lg text-slate-500"><ArrowLeft className="w-5 h-5"/></button>
+           <button onClick={onBack} className="p-2 hover:bg-slate-100 rounded-lg text-slate-500 transition-colors"><ArrowLeft className="w-5 h-5"/></button>
            <span className="font-bold text-slate-800 break-all">{sample.filename}</span>
          </div>
          <div className="flex items-center gap-3">
            <button 
              onClick={handleUndo} 
              disabled={annotations.length === 0} 
-             className="px-3 py-1.5 text-slate-600 hover:bg-slate-100 rounded text-sm flex items-center disabled:opacity-50 disabled:cursor-not-allowed"
+             className="px-3 py-1.5 text-slate-600 hover:bg-slate-100 rounded-lg text-sm flex items-center disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
            >
              <Undo className="w-4 h-4 mr-1"/> 撤销
            </button>
-           <button onClick={() => setAnnotations([])} className="px-3 py-1.5 text-slate-600 hover:bg-slate-100 rounded text-sm flex items-center"><Trash2 className="w-4 h-4 mr-1"/> 清空</button>
-           <button onClick={saveAnnotations} className="px-4 py-1.5 bg-indigo-600 text-white rounded shadow-sm text-sm font-medium flex items-center hover:bg-indigo-700"><Save className="w-4 h-4 mr-2"/> 保存标注</button>
+           <button onClick={() => setAnnotations([])} className="px-3 py-1.5 text-slate-600 hover:bg-slate-100 rounded-lg text-sm flex items-center transition-colors"><Trash2 className="w-4 h-4 mr-1"/> 清空</button>
+           <button onClick={saveAnnotations} className="px-4 py-1.5 bg-indigo-600 text-white rounded-lg shadow-sm text-sm font-medium flex items-center hover:bg-indigo-700 transition-colors"><Save className="w-4 h-4 mr-2"/> 保存标注</button>
          </div>
       </div>
       
-      <div className="flex flex-1 overflow-hidden">
-        <div className="w-56 bg-white border-r border-slate-200 p-4 flex flex-col gap-2 overflow-y-auto">
-           <span className="text-xs font-bold text-slate-500 mb-2 uppercase">选择当前绘制标签</span>
+      <div className="flex flex-1 overflow-hidden relative">
+        <div className="w-60 bg-white border-r border-slate-200 p-4 flex flex-col gap-2 overflow-y-auto z-10 shadow-[4px_0_15px_-3px_rgba(0,0,0,0.05)]">
+           <span className="text-xs font-bold text-slate-500 mb-2 uppercase tracking-wider">选择当前绘制标签</span>
            {globalClasses.map(cls => (
              <button 
                key={cls.id}
                onClick={() => setActiveClass(cls.code)}
                style={activeClass === cls.code ? { borderColor: cls.color, backgroundColor: `${cls.color}15`, color: cls.color } : {}}
-               className={`px-3 py-2 rounded text-left text-sm flex items-center font-bold ${activeClass === cls.code ? 'border-2' : 'text-slate-600 hover:bg-slate-50 border-2 border-transparent'}`}
+               className={`px-3 py-2.5 rounded-lg text-left text-sm flex items-center font-bold transition-all ${activeClass === cls.code ? 'border-2 shadow-sm' : 'text-slate-600 hover:bg-slate-50 border-2 border-transparent'}`}
              >
                <Tag className="w-4 h-4 mr-2" style={{ color: cls.color }} /> {cls.name}
              </button>
            ))}
         </div>
 
-        <div className="flex-1 bg-slate-200 flex items-center justify-center p-6 overflow-hidden">
-            <div className="relative shadow-xl bg-white cursor-crosshair border-2 border-slate-300 w-full h-full flex items-center justify-center bg-[url('data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAoAAAAKCAYAAACNMs+9AAAAAXNSR0IArs4c6QAAACVJREFUKFNjZCASMDKhuP///1/xM2ZmgIQZYRQYNSC1DAyUoQEA2m0H+Xg7rA0AAAAASUVORK5CYII=')]">
+        <div className="flex-1 bg-slate-200 flex items-center justify-center p-6 overflow-hidden relative">
+            <div className="relative shadow-2xl bg-white cursor-crosshair border-2 border-slate-300 w-full h-full flex items-center justify-center bg-[url('data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAoAAAAKCAYAAACNMs+9AAAAAXNSR0IArs4c6QAAACVJREFUKFNjZCASMDKhuP///1/xM2ZmgIQZYRQYNSC1DAyUoQEA2m0H+Xg7rA0AAAAASUVORK5CYII=')]">
                <canvas 
                  ref={canvasRef}
                  onMouseDown={handleMouseDown}
@@ -562,7 +708,7 @@ const RealAnnotationEditor: React.FC<{ sample: Sample, globalClasses: GlobalClas
                  className="max-w-full max-h-full object-contain pointer-events-auto"
                  style={{ display: 'block' }}
                />
-               {!imgObj && <div className="absolute inset-0 flex items-center justify-center text-slate-400 bg-white">Loading Image...</div>}
+               {!imgObj && <div className="absolute inset-0 flex items-center justify-center text-slate-400 bg-white/80 backdrop-blur-sm font-medium"><Loader2 className="w-6 h-6 mr-2 animate-spin"/>加载图像中...</div>}
             </div>
         </div>
       </div>
