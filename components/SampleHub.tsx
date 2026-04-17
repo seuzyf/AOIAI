@@ -587,22 +587,34 @@ const RealAnnotationEditor: React.FC<{ sample: Sample, globalClasses: GlobalClas
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
 
+    // 动态计算线条粗细和字体大小，以适应高分辨率大图
+    const scaleFactor = Math.max(1, canvas.width / 1000);
+    const dynamicLineWidth = Math.max(3, Math.round(3 * scaleFactor));
+    const dynamicFontSize = Math.max(24, Math.round(24 * scaleFactor));
+    const textOffsetY = Math.max(10, Math.round(10 * scaleFactor));
+
     rects.forEach(rect => {
       const cls = globalClasses.find(c => c.code === rect.label);
       const color = cls ? cls.color : '#eab308';
       ctx.strokeStyle = color;
-      ctx.lineWidth = 3;
+      ctx.lineWidth = dynamicLineWidth;
       ctx.strokeRect(rect.bbox.x, rect.bbox.y, rect.bbox.width, rect.bbox.height);
       ctx.fillStyle = color;
-      ctx.font = 'bold 24px Arial';
-      ctx.fillText(cls ? cls.name.split(' ')[0] : rect.label, rect.bbox.x, rect.bbox.y > 25 ? rect.bbox.y - 10 : rect.bbox.y + 25);
+      ctx.font = `bold ${dynamicFontSize}px Arial`;
+      
+      const textY = rect.bbox.y > (dynamicFontSize + textOffsetY) 
+        ? rect.bbox.y - textOffsetY 
+        : rect.bbox.y + dynamicFontSize + textOffsetY;
+        
+      ctx.fillText(cls ? cls.name.split(' ')[0] : rect.label, rect.bbox.x, textY);
     });
 
     if (drawingRect) {
       const activeCls = globalClasses.find(c => c.code === activeClass);
       ctx.strokeStyle = activeCls ? activeCls.color : '#ef4444';
-      ctx.lineWidth = 3;
-      ctx.setLineDash([10, 10]);
+      ctx.lineWidth = dynamicLineWidth;
+      const dashSize = Math.round(10 * scaleFactor);
+      ctx.setLineDash([dashSize, dashSize]);
       ctx.strokeRect(drawingRect.x, drawingRect.y, drawingRect.width, drawingRect.height);
       ctx.setLineDash([]);
     }
