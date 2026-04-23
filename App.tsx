@@ -251,7 +251,7 @@ function App() {
           {menuItems.map((item) => {
             const handleClick = () => {
               if (item.externalLink) {
-                window.open('http://10.87.73.71:3000/', '_blank');
+                window.open('/chat/', '_blank');
               } else {
                 setActiveTab(item.id as AppTab);
               }
