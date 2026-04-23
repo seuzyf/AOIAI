@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Upload, FileUp, Search, Database, Loader2, Save, Trash2, Tag, ArrowLeft, Plus, Filter, CheckSquare, Square, FolderArchive, Image as ImageIcon, X, User, Undo, AlertCircle } from 'lucide-react';
+import { Upload, FileUp, Search, Database, Loader2, Save, Trash2, Tag, ArrowLeft, Plus, Filter, CheckSquare, Square, FolderArchive, Image as ImageIcon, X, User, Undo, AlertCircle, ZoomIn, ZoomOut, Maximize, MousePointer2 } from 'lucide-react';
 import { Sample, Annotation, GlobalClass, UserInfo, Dataset } from '../types';
 import { DEVICE_BRANDS, PROCESS_TYPES, LINE_TYPES } from '../constants';
 import { api } from '../api';
@@ -557,6 +557,7 @@ const DatasetModal = ({ selectedIds, onClose, onSuccess, currentUser }: { select
 
 const RealAnnotationEditor: React.FC<{ sample: Sample, globalClasses: GlobalClass[], currentUser: UserInfo, onBack: () => void }> = ({ sample, globalClasses, currentUser, onBack }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
   
   const [annotations, setAnnotations] = useState<Annotation[]>(sample.annotations || []);
   const [activeClass, setActiveClass] = useState<string>(globalClasses[0]?.code || 'UNKNOWN');
@@ -564,6 +565,39 @@ const RealAnnotationEditor: React.FC<{ sample: Sample, globalClasses: GlobalClas
   const [startPos, setStartPos] = useState({ x: 0, y: 0 });
   const [currentPos, setCurrentPos] = useState({ x: 0, y: 0 });
   const [imgObj, setImgObj] = useState<HTMLImageElement | null>(null);
+  
+  const [zoom, setZoom] = useState(1);
+
+  const fitScreen = (img: HTMLImageElement) => {
+    if (!containerRef.current) return;
+    const cw = containerRef.current.clientWidth - 48; // padding 补偿
+    const ch = containerRef.current.clientHeight - 48;
+    const scale = Math.min(cw / img.naturalWidth, ch / img.naturalHeight, 1);
+    setZoom(scale);
+  };
+
+  // 添加全局滚轮监听，实现无极缩放
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+
+    const handleWheel = (e: WheelEvent) => {
+      // 阻止浏览器默认的滚轮行为（防止整个页面滚动）
+      e.preventDefault();
+      
+      // 使用指数平滑系数，确保无极缩放流畅 (deltaY > 0 为缩小，< 0 为放大)
+      const zoomDelta = Math.pow(0.998, e.deltaY);
+      
+      setZoom(prevZoom => {
+        const newZoom = prevZoom * zoomDelta;
+        return Math.max(0.01, Math.min(50, newZoom)); // 限制范围从 1% 到 5000%
+      });
+    };
+
+    // { passive: false } 允许我们在事件处理函数中使用 preventDefault()
+    container.addEventListener('wheel', handleWheel, { passive: false });
+    return () => container.removeEventListener('wheel', handleWheel);
+  }, []);
 
   useEffect(() => {
     const img = new Image();
@@ -574,6 +608,7 @@ const RealAnnotationEditor: React.FC<{ sample: Sample, globalClasses: GlobalClas
          canvasRef.current.height = img.naturalHeight;
       }
       setImgObj(img); 
+      fitScreen(img);
       redraw(img, annotations, null); 
     };
   }, [sample.thumbnailUrl]);
@@ -587,11 +622,12 @@ const RealAnnotationEditor: React.FC<{ sample: Sample, globalClasses: GlobalClas
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
 
-    // 动态计算线条粗细和字体大小，以适应高分辨率大图
-    const scaleFactor = Math.max(1, canvas.width / 1000);
-    const dynamicLineWidth = Math.max(3, Math.round(3 * scaleFactor));
-    const dynamicFontSize = Math.max(24, Math.round(24 * scaleFactor));
-    const textOffsetY = Math.max(10, Math.round(10 * scaleFactor));
+    // 核心修改：为了在不同缩放比例下，屏幕上显示的线条和字体始终保持物理上的一致大小，
+    // 我们直接用期望的屏幕像素除以当前的 zoom 值。
+    // 假设我们期望在屏幕上线宽是 2px，字体是 14px：
+    const dynamicLineWidth = Math.max(0.5, 2 / zoom);
+    const dynamicFontSize = Math.max(2, 14 / zoom);
+    const textOffsetY = Math.max(1, 8 / zoom);
 
     rects.forEach(rect => {
       const cls = globalClasses.find(c => c.code === rect.label);
@@ -613,7 +649,7 @@ const RealAnnotationEditor: React.FC<{ sample: Sample, globalClasses: GlobalClas
       const activeCls = globalClasses.find(c => c.code === activeClass);
       ctx.strokeStyle = activeCls ? activeCls.color : '#ef4444';
       ctx.lineWidth = dynamicLineWidth;
-      const dashSize = Math.round(10 * scaleFactor);
+      const dashSize = Math.round(10 / zoom);
       ctx.setLineDash([dashSize, dashSize]);
       ctx.strokeRect(drawingRect.x, drawingRect.y, drawingRect.width, drawingRect.height);
       ctx.setLineDash([]);
@@ -630,7 +666,7 @@ const RealAnnotationEditor: React.FC<{ sample: Sample, globalClasses: GlobalClas
       } : null;
       redraw(imgObj, annotations, drawingRect);
     }
-  }, [annotations, isDrawing, currentPos, imgObj, activeClass]);
+  }, [annotations, isDrawing, currentPos, imgObj, activeClass, zoom]);
 
   const getMousePos = (e: React.MouseEvent) => {
     const canvas = canvasRef.current;
@@ -655,7 +691,8 @@ const RealAnnotationEditor: React.FC<{ sample: Sample, globalClasses: GlobalClas
     const width = Math.abs(currentPos.x - startPos.x);
     const height = Math.abs(currentPos.y - startPos.y);
     
-    if (width > 20 && height > 20) {
+    // 如果框实在太小，忽略绘制
+    if (width > (20/zoom) && height > (20/zoom)) {
       const newAnnotation: Annotation = {
         id: `ann-${Date.now()}`,
         label: activeClass,
@@ -682,6 +719,22 @@ const RealAnnotationEditor: React.FC<{ sample: Sample, globalClasses: GlobalClas
            <span className="font-bold text-slate-800 break-all">{sample.filename}</span>
          </div>
          <div className="flex items-center gap-3">
+           
+           <div className="flex items-center gap-1 border-r border-slate-200 pr-3 mr-1 bg-slate-100/80 rounded-lg p-1">
+             <button onClick={() => setZoom(z => Math.max(0.01, z * 0.85))} className="p-1 text-slate-500 hover:bg-white hover:text-indigo-600 hover:shadow-sm rounded transition-all" title="缩小画布">
+               <ZoomOut className="w-4 h-4"/>
+             </button>
+             <span className="text-[11px] font-mono font-bold w-12 text-center text-slate-600 select-none">
+               {Math.round(zoom * 100)}%
+             </span>
+             <button onClick={() => setZoom(z => Math.min(50, z * 1.15))} className="p-1 text-slate-500 hover:bg-white hover:text-indigo-600 hover:shadow-sm rounded transition-all" title="放大画布">
+               <ZoomIn className="w-4 h-4"/>
+             </button>
+             <button onClick={() => imgObj && fitScreen(imgObj)} className="p-1 text-slate-500 hover:bg-white hover:text-indigo-600 hover:shadow-sm rounded transition-all ml-1" title="自适应窗口大小">
+               <Maximize className="w-4 h-4"/>
+             </button>
+           </div>
+
            <button 
              onClick={handleUndo} 
              disabled={annotations.length === 0} 
@@ -696,7 +749,10 @@ const RealAnnotationEditor: React.FC<{ sample: Sample, globalClasses: GlobalClas
       
       <div className="flex flex-1 overflow-hidden relative">
         <div className="w-60 bg-white border-r border-slate-200 p-4 flex flex-col gap-2 overflow-y-auto z-10 shadow-[4px_0_15px_-3px_rgba(0,0,0,0.05)]">
-           <span className="text-xs font-bold text-slate-500 mb-2 uppercase tracking-wider">选择当前绘制标签</span>
+           <span className="text-xs font-bold text-slate-500 mb-2 uppercase tracking-wider flex items-center justify-between">
+             绘制标签
+             <span className="text-[9px] text-indigo-400 bg-indigo-50 px-1.5 py-0.5 rounded flex items-center gap-0.5" title="在右侧图片区通过鼠标滚轮进行无极缩放"><MousePointer2 className="w-3 h-3"/>滚轮缩放</span>
+           </span>
            {globalClasses.map(cls => (
              <button 
                key={cls.id}
@@ -709,15 +765,21 @@ const RealAnnotationEditor: React.FC<{ sample: Sample, globalClasses: GlobalClas
            ))}
         </div>
 
-        <div className="flex-1 bg-slate-200 flex items-center justify-center p-6 overflow-hidden relative">
-            <div className="relative shadow-2xl bg-white cursor-crosshair border-2 border-slate-300 w-full h-full flex items-center justify-center bg-[url('data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAoAAAAKCAYAAACNMs+9AAAAAXNSR0IArs4c6QAAACVJREFUKFNjZCASMDKhuP///1/xM2ZmgIQZYRQYNSC1DAyUoQEA2m0H+Xg7rA0AAAAASUVORK5CYII=')]">
+        <div ref={containerRef} className="flex-1 bg-slate-200 overflow-auto flex relative p-6 custom-scrollbar">
+            <div 
+              className="m-auto relative shadow-2xl bg-white cursor-crosshair border border-slate-300 flex-shrink-0 bg-[url('data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAoAAAAKCAYAAACNMs+9AAAAAXNSR0IArs4c6QAAACVJREFUKFNjZCASMDKhuP///1/xM2ZmgIQZYRQYNSC1DAyUoQEA2m0H+Xg7rA0AAAAASUVORK5CYII=')]"
+              style={{ 
+                width: imgObj ? imgObj.naturalWidth * zoom : '100%', 
+                height: imgObj ? imgObj.naturalHeight * zoom : '100%' 
+              }}
+            >
                <canvas 
                  ref={canvasRef}
                  onMouseDown={handleMouseDown}
                  onMouseMove={handleMouseMove}
                  onMouseUp={handleMouseUp}
                  onMouseLeave={handleMouseUp}
-                 className="max-w-full max-h-full object-contain pointer-events-auto"
+                 className="w-full h-full pointer-events-auto"
                  style={{ display: 'block' }}
                />
                {!imgObj && <div className="absolute inset-0 flex items-center justify-center text-slate-400 bg-white/80 backdrop-blur-sm font-medium"><Loader2 className="w-6 h-6 mr-2 animate-spin"/>加载图像中...</div>}
